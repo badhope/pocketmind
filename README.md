@@ -1,25 +1,40 @@
-# Thesis Specialist
+# Thesis Specialist · 论文专家智能体
 
-## 论文专家智能体 | Academic Thesis Writing Agent
+> **一个"文件夹即 Agent"的论文写作工具**。整个目录就是 Agent 本体。
+> 把它丢给任何支持长上下文的 LLM (Doubao / Claude / GPT / Gemini),
+> 它会按内置流程走完论文写作工作流。
 
-[![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)](README.md)
-[![Platform](https://img.shields.io/badge/platform-Folder--as--Agent-green.svg)](README.md)
-[![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
-
----
-
-# 📖 目录 | Table of Contents
-
-- [English Description](#english)
-- [中文介绍](#中文)
-- [快速开始 | Quick Start](#quick-start)
-- [完整使用指南 | Complete Usage Guide](#usage-guide)
-- [架构说明 | Architecture](#architecture)
-- [示例 | Examples](#examples)
+名字里的 "Folder-as-Agent" 是我生造的词,意思就是:**agent
+不一定要是 Python 包、不一定要是 REST 服务,也可以是一个
+目录 + 一份系统提示 + 一组定义好的 skill**。这样它在所有
+LLM 平台都能跑,不依赖任何 runtime。
 
 ---
 
-# English
+## 它做了什么
+
+- 拆解论文题目为子任务 (选题 → 大纲 → 文献 → 方法 → 写作 → 校对)
+- 维护写作上下文,避免每次都从头讲
+- 内置学术规范 (引用格式、图表规范、章节逻辑)
+- 输出 Markdown / LaTeX 双格式
+- 支持中英文双语 (默认中文)
+
+## 怎么用
+
+把整个目录下载下来,提交到任何 LLM 的对话,或者用 Claude Code /
+Cursor 之类的工具直接打开。系统提示会自动从 `system-prompt.md` 加载。
+
+具体步骤见 [USAGE_GUIDE.md](USAGE_GUIDE.md)。
+
+## 不做什么
+
+- 不会替你查文献 (还是需要你提供 PDF 或者 DOI)
+- 不会做实证 (不会跑你的数据,只能帮你写"方法"那一节)
+- 不会替你审稿 (写完还是要人看)
+
+论文是你的,Agent 只是脚手架。
+
+---
 
 ## Platform Overview
 
