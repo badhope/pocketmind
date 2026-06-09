@@ -7,7 +7,6 @@ authors:
   - family-names: badhope
     given-names: badhope
     alias: badhope
-    orcid: https://orcid.org/0000-0000-0000-0000
 identifiers:
   - type: url
     value: https://github.com/badhope/Thesis-Specialist-Agent
@@ -16,6 +15,15 @@ type: software
 url: https://github.com/badhope/Thesis-Specialist-Agent
 repository-code: https://github.com/badhope/Thesis-Specialist-Agent
 keywords:
-  - open-source, software
+  - thesis
+  - academic-writing
+  - ai-assistant
+  - llm
+  - python
+  - research
+  - folder-as-agent
+  - agent
+  - badhope
+  - claude
 abstract: >-
-  Folder-as-Agent platform for academic thesis writing - compatible with Doubao, Claude, GPT, Gemini
+  Folder-as-Agent for thesis writing. The folder itself is the agent — feed it to Doubao, Claude, GPT, or Gemini, and it runs the workflow. Compatible with any LLM that reads files.
