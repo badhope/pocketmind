@@ -1,65 +1,46 @@
 # Contributing
 
-Thanks for your interest in contributing! This document covers the
-basics so we can review and merge changes quickly.
+Want to send a PR? Cool. Here's the flow.
 
-## Ground Rules
+## Before you start
 
-- Be respectful. We follow the project's
-  [Code of Conduct](./CODE_OF_CONDUCT.md).
-- Keep PRs focused. One feature / fix per PR.
-- Discuss breaking changes in an issue **before** opening the PR.
-- Don't commit secrets, large binaries, or generated build output.
+- **Open an issue first** if the change is non-trivial. I don't want you
+  to spend a weekend on something I'd have asked you to do differently.
+- Read the code that's already there. I try to keep it boring and
+  consistent. If you're adding a new pattern, it should fit.
+- Look at the README for how to install / run / test. Use the lockfile
+  that's checked in; don't regenerate it.
 
-## Development
+## Local checks
 
-1. **Fork & branch**: branch off `main`, name it
-   `feat/<short-topic>` or `fix/<short-topic>`.
-2. **Install** dependencies using the lockfile shipped in the repo
-   (pnpm / npm / uv / pip / cargo — see `README.md` for the exact
-   command).
-3. **Run checks locally** before pushing:
-   - linter (`lint`)
-   - formatter (`format:check` or equivalent)
-   - unit tests
-4. **Write tests** for any non-trivial logic. Bug fixes should ship a
-   regression test.
+Run whatever the project has: `pnpm test`, `pytest`, `cargo test`, etc.
+If linter / formatter configs are checked in, run them too. CI will
+catch what you missed, but a green push is faster than a red one.
 
-## Commit Messages
+## Commit messages
 
-We loosely follow Conventional Commits:
+I don't enforce Conventional Commits. Subject, blank line, body, done.
+If a commit fixes an issue, mention the issue number. Don't bother with
+emoji or "WIP" prefixes.
 
-```
-<type>(<scope>): <short summary>
+## Pull requests
 
-<body — explain the *why*, link the issue>
-```
+- Fill the PR template. One paragraph in the body is fine; screenshots
+  help for UI.
+- Keep the diff small. Squash before merging unless the history matters.
+- I'll review roughly in order of arrival. If CI is green and the change
+  does what the description says, I'll merge. I might push back on
+  architecture; that's not personal.
+- Don't commit secrets, generated build output, large binaries, or
+  someone else's code without a license.
 
-Common types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `ci`.
+## What I won't merge
 
-## Pull Requests
-
-- Fill in the PR template. Screenshots help for UI work.
-- Keep the diff small. Squash commits before merging unless the history
-  is itself useful.
-- Make sure CI is green; reviewers may wait for the first green run
-  before looking.
-
-## Reporting Bugs
-
-Use the **Bug report** issue template. Include:
-
-- exact version / commit SHA
-- minimal reproduction (command, snippet, or screenshot)
-- expected vs actual behavior
-- environment (OS, runtime version, container, etc.)
-
-## Suggesting Features
-
-Open a **Feature request** issue. Describe the problem first, then the
-proposed solution. We're more likely to act on clear user pain.
+- Drive-by refactors that don't fix a real problem.
+- New dependencies for trivial reasons.
+- Anything that breaks the existing API without a heads-up first.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed
-under the same license as the project (see [`LICENSE`](./LICENSE)).
+By contributing, you agree your contribution is licensed under the same
+license as the rest of the project. See [`LICENSE`](./LICENSE).
