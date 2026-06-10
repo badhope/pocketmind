@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software in academic work, please cite it using the
+  metadata below.
+title: Thesis-Specialist-Agent
+authors:
+  - family-names: badhope
+    given-names: badhope
+    alias: badhope
+identifiers:
+  - type: url
+    value: https://github.com/badhope/Thesis-Specialist-Agent
+license: MIT
+type: software
+url: https://github.com/badhope/Thesis-Specialist-Agent
+repository-code: https://github.com/badhope/Thesis-Specialist-Agent
+keywords:
+  - thesis
+  - academic-writing
+  - ai-assistant
+  - llm
+  - python
+  - research
+  - folder-as-agent
+  - agent
+  - badhope
+  - claude
+abstract: >-
+  Folder-as-Agent for thesis writing. The folder itself is the agent — feed it to Doubao, Claude, GPT, or Gemini, and it runs the workflow. Compatible with any LLM that reads files.
