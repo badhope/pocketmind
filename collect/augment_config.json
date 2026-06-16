@@ -1,0 +1,126 @@
+[
+    {
+        "dir": [
+            "function",
+            "parameters",
+            "target_element"
+        ],
+        "pattern": "一键收",
+        "multiplier": {
+            "decider": 10,
+            "decider_no_history": 0,
+            "grounder": 7,
+            "default": 1
+        }
+    },
+    {
+        "dir": [
+            "function",
+            "parameters",
+            "target_element"
+        ],
+        "pattern": "找能量",
+        "multiplier": {
+            "decider": 10,
+            "decider_no_history": 0,
+            "grounder": 7,
+            "default": 1
+        }
+    },
+    {
+        "dir": [
+            "reasoning"
+        ],
+        "pattern": "没有.*搜索",
+        "multiplier": {
+            "decider": 10,
+            "decider_no_history": 10,
+            "grounder": 1,
+            "default": 1
+        }
+    },
+    {
+        "dir": [
+            "reasoning"
+        ],
+        "pattern": "黑屏",
+        "multiplier": {
+            "decider": 5,
+            "decider_no_history": 5,
+            "grounder": 1,
+            "default": 1
+        }
+    },
+    {
+        "dir": [
+            "function",
+            "name"
+        ],
+        "pattern": "swipe",
+        "multiplier": {
+            "decider": 5,
+            "decider_no_history": 5,
+            "grounder": 1,
+            "default": 1
+        }
+    },
+    {
+        "dir": [
+            "function",
+            "parameters",
+            "target_element"
+        ],
+        "pattern": "删除",
+        "multiplier": {
+            "grounder": 20,
+            "default": 10
+        }
+    },
+    {
+        "dir": [
+            "function",
+            "parameters",
+            "target_element"
+        ],
+        "pattern": "关闭",
+        "multiplier": {
+            "grounder": 30,
+            "default": 25
+        }
+    },
+    {
+        "dir": [
+            "function",
+            "name"
+        ],
+        "pattern": "wait",
+        "multiplier": {
+            "decider": 3,
+            "decider_no_history": 3,
+            "grounder": 1,
+            "default": 1
+        }
+    },
+    {
+        "dir": [
+            "function",
+            "parameters",
+            "target_element"
+        ],
+        "pattern": "支付",
+        "multiplier": {
+            "default": 3
+        }
+    },
+    {
+        "dir": [
+            "function",
+            "parameters",
+            "target_element"
+        ],
+        "pattern": "订",
+        "multiplier": {
+            "default": 3
+        }
+    }
+]

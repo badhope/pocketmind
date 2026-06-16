@@ -1,0 +1,32 @@
+# 忽略特定文件
+screenshot*.jpg
+list.error
+tasks.json
+
+# 忽略特定目录
+__pycache__/
+data/
+log/
+data_log/
+weights/
+
+utils/experience/BAAI/
+.venv/
+utils/experience/BAAI/
+utils/experience/all-MiniLM-L6-v2/
+data-*
+new_data/
+vectordb/
+RAG/
+utils/experience/BAAI/
+
+output*/
+utils/experience/multistage_plans_storage
+utils/experience/singletask_storage
+runner/HarmonyOS-mobiagent/
+runner/UI-TARS-agent/data_uitars-test/
+tasks/
+utils/experience/templates-new-bak.json
+.vscode/
+collect/auto/ui-semantic-output/
+

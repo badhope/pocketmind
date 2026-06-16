@@ -1,0 +1,12 @@
+scikit-image
+torch
+sentence-transformers>=2.7.0
+transformers>=4.51.0
+scikit-learn
+numpy==1.26.4
+torchvision
+supervision==0.18.0
+paddleocr
+paddlepaddle
+openai
+accelerate
