@@ -11,13 +11,27 @@ import os
 import base64
 import logging
 import socket
+import yaml
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
 # 模型目录的绝对路径(基于本文件所在目录)
 _MODELS_DIR = str(Path(__file__).parent / "models")
+_CONFIG_PATH = Path(__file__).parent / "config.yaml"
+
+
+def _load_config() -> dict:
+    """从 config.yaml 加载配置(单一数据源)"""
+    if not _CONFIG_PATH.exists():
+        logger.warning(f"config.yaml 不存在: {_CONFIG_PATH}")
+        return {}
+    with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+_CONFIG = _load_config()
 
 
 def _is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
@@ -227,81 +241,17 @@ class LLMBackend:
 
 
 # ---------------------------------------------------------------------------
-# 模型注册表: 定义所有支持的模型
+# 模型注册表: 从 config.yaml 动态加载(单一数据源,避免代码与配置漂移)
 # ---------------------------------------------------------------------------
-MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
-    "minicpm-v-4.6": {
-        "name": "MiniCPM-V 4.6",
-        "repo": "openbmb/MiniCPM-V-4.6-gguf",
-        "files": {
-            "model": "MiniCPM-V-4.6-Q4_K_M.gguf",
-            "mmproj": "mmproj-MiniCPM-V-4.6-F16.gguf",
-        },
-        "size_gb": 1.3,
-        "ram_gb": 4,
-        "license": "Apache-2.0",
-        "source": "huggingface",
-        "is_vision": True,
-        "description": "面壁智能+清华,Qwen3.5-0.8B+SigLIP2,1.3B 同尺寸 SOTA,4GB RAM",
-    },
-    "qwen3.5-0.8b": {
-        "name": "Qwen3.5-0.8B",
-        "repo": "unsloth/Qwen3.5-0.8B-GGUF",
-        "files": {
-            "model": "Qwen3.5-0.8B-UD-Q4_K_XL.gguf",
-            "mmproj": "mmproj-BF16.gguf",
-        },
-        "size_gb": 0.6,
-        "ram_gb": 3,
-        "license": "Apache-2.0",
-        "source": "huggingface",
-        "is_vision": True,
-        "description": "Qwen3.5 最小尺寸,原生多模态,3GB RAM 极致小",
-    },
-    "qwen3.5-2b": {
-        "name": "Qwen3.5-2B",
-        "repo": "unsloth/Qwen3.5-2B-GGUF",
-        "files": {
-            "model": "Qwen3.5-2B-UD-Q4_K_XL.gguf",
-            "mmproj": "mmproj-BF16.gguf",
-        },
-        "size_gb": 1.5,
-        "ram_gb": 4,
-        "license": "Apache-2.0",
-        "source": "huggingface",
-        "is_vision": True,
-        "description": "Qwen3.5 原生多模态(图+视频+文本),4GB RAM",
-    },
-    "qwen3.5-4b": {
-        "name": "Qwen3.5-4B",
-        "repo": "unsloth/Qwen3.5-4B-GGUF",
-        "files": {
-            "model": "Qwen3.5-4B-UD-Q4_K_XL.gguf",
-            "mmproj": "mmproj-BF16.gguf",
-        },
-        "size_gb": 2.5,
-        "ram_gb": 6,
-        "license": "Apache-2.0",
-        "source": "huggingface",
-        "is_vision": True,
-        "description": "Qwen3.5 原生多模态,Unsloth 动态量化,6GB RAM",
-    },
-    "gui-owl-7b": {
-        "name": "GUI-Owl-7B (需自转GGUF)",
-        "repo": "mPLUG/GUI-Owl-7B",
-        "files": {
-            "model": "GUI-Owl-7B-Q4_K_M.gguf",
-            "mmproj": "mmproj-F16.gguf",
-        },
-        "size_gb": 5.0,
-        "ram_gb": 10,
-        "license": "MIT",
-        "source": "huggingface",
-        "is_vision": True,
-        "description": "通义 GUI-Owl,GUI 自动化 SOTA,需用 convert_hf_to_gguf.py 自行转换",
-        "note": "此模型无官方GGUF,需从safetensors自行转换: python convert_hf_to_gguf.py mPLUG/GUI-Owl-7B --mmproj",
-    },
-}
+def _build_model_registry() -> Dict[str, Dict[str, Any]]:
+    """从 config.yaml 的 models 段构建模型注册表"""
+    models_cfg = _CONFIG.get("models", {})
+    if not models_cfg:
+        logger.warning("config.yaml 中无 models 定义,使用空注册表")
+    return dict(models_cfg)
+
+
+MODEL_REGISTRY: Dict[str, Dict[str, Any]] = _build_model_registry()
 
 
 def get_model_info(model_name: str) -> Dict[str, Any]:
@@ -315,15 +265,22 @@ def get_model_info(model_name: str) -> Dict[str, Any]:
 
 
 def auto_select_model(ram_gb: int) -> str:
-    """根据 RAM 自动选择模型"""
-    if ram_gb < 4:
-        return "qwen3.5-0.8b"
-    elif ram_gb < 6:
-        return "minicpm-v-4.6"
-    elif ram_gb < 10:
-        return "qwen3.5-4b"
-    else:
-        return "gui-owl-7b"
+    """根据 RAM 自动选择模型(从 config.yaml 的 auto_select 规则读取)"""
+    auto_cfg = _CONFIG.get("auto_select", {})
+    # 按阈值从大到小匹配
+    thresholds = [
+        (10, auto_cfg.get("ram_10gb")),
+        (6, auto_cfg.get("ram_6gb")),
+        (4, auto_cfg.get("ram_4gb")),
+        (3, auto_cfg.get("ram_3gb")),
+    ]
+    for threshold, model_name in thresholds:
+        if ram_gb >= threshold and model_name:
+            return model_name
+    # 兜底:返回注册表第一个
+    if MODEL_REGISTRY:
+        return next(iter(MODEL_REGISTRY))
+    raise ValueError("无可用模型,请检查 config.yaml")
 
 
 def get_ram_gb() -> int:

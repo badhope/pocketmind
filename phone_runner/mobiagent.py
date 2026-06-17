@@ -12,7 +12,7 @@ MobiAgent Phone Runner - 主程序
 from openai import OpenAI
 import uiautomator2 as u2
 import base64
-from PIL import Image
+from PIL import Image, ImageDraw
 import json
 import io
 import logging
@@ -21,7 +21,6 @@ import time
 import re
 import os
 import argparse
-from PIL import Image, ImageDraw
 import textwrap
 
 from pathlib import Path
@@ -37,23 +36,8 @@ from llm_backend import (
     auto_select_model,
     get_ram_gb,
     resolve_model_path,
+    _CONFIG as CONFIG,
 )
-
-import yaml
-
-# ============================================================================
-# 配置加载
-# ============================================================================
-def load_config() -> dict:
-    """加载 config.yaml"""
-    config_path = Path(__file__).parent / "config.yaml"
-    if config_path.exists():
-        with open(config_path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f)
-    return {}
-
-
-CONFIG = load_config()
 
 # 从配置读取最大步数(默认 35)
 MAX_STEPS = CONFIG.get("agent", {}).get("max_steps", 35)
@@ -376,9 +360,13 @@ json_schema = ActionPlan.model_json_schema()
 
 
 class GroundResponse(BaseModel):
-    coordinates: list[int] = Field(description="点击坐标 [x, y]", default=None)
-    bbox: list[int] = Field(description="边界框 [x1, y1, x2, y2]", default=None)
-    bbox_2d: list[int] = Field(
+    coordinates: Optional[list[int]] = Field(
+        description="点击坐标 [x, y]", default=None
+    )
+    bbox: Optional[list[int]] = Field(
+        description="边界框 [x1, y1, x2, y2]", default=None
+    )
+    bbox_2d: Optional[list[int]] = Field(
         description="边界框 [x1, y1, x2, y2]", default=None
     )
 
@@ -489,8 +477,6 @@ def create_swipe_visualization(data_dir, image_index, direction):
 
 
 def robust_json_loads(s):
-    import re
-
     s = s.strip()
     codeblock = re.search(r"```json(.*?)```", s, re.DOTALL)
     if codeblock:
@@ -554,19 +540,30 @@ def robust_json_loads(s):
 
 
 def load_prompt(md_name):
-    """从 prompts 目录加载 prompt 模板(支持 phone_runner/prompts 和上级 prompts)"""
-    current_dir = os.path.dirname(os.path.abspath(__file__))
+    """从 prompts 目录加载 prompt 模板(支持 phone_runner/prompts 和上级 prompts)
 
-    # 优先查找 phone_runner/prompts
-    prompt_file = os.path.join(current_dir, "prompts", md_name)
-    if not os.path.exists(prompt_file):
-        # 回退到上级目录 prompts
-        prompt_file = os.path.join(current_dir, "..", "prompts", md_name)
+    优先查找 phone_runner/prompts,回退到上级目录 prompts。
+    若两处均不存在,抛出 FileNotFoundError 并列出已搜索路径。
+    """
+    current_dir = Path(__file__).resolve().parent
 
-    with open(prompt_file, "r", encoding="utf-8") as f:
-        content = f.read()
-    content = content.replace("````markdown", "").replace("````", "")
-    return content.strip()
+    # 候选搜索路径(按优先级)
+    candidates = [
+        current_dir / "prompts" / md_name,
+        current_dir.parent / "prompts" / md_name,
+    ]
+
+    for prompt_file in candidates:
+        if prompt_file.exists():
+            content = prompt_file.read_text(encoding="utf-8")
+            content = content.replace("````markdown", "").replace("````", "")
+            return content.strip()
+
+    # 所有路径均不存在,给出清晰的错误信息
+    searched = "\n  ".join(str(p) for p in candidates)
+    raise FileNotFoundError(
+        f"Prompt 模板 '{md_name}' 未找到。已搜索以下路径:\n  {searched}"
+    )
 
 
 import xml.etree.ElementTree as ET
@@ -687,7 +684,6 @@ def find_best_match_node(root, target_element):
 # ============================================================================
 def task_in_app(
     app,
-    old_task,
     task,
     device,
     data_dir,
@@ -703,8 +699,6 @@ def task_in_app(
     global use_local_llm_grounder
     global use_local_llm_decider
 
-    full_history = []
-
     if use_qwen3:
         grounder_prompt_template_bbox = load_prompt("grounder_qwen3_bbox.md")
         grounder_prompt_template_no_bbox = load_prompt(
@@ -715,10 +709,6 @@ def task_in_app(
         grounder_prompt_template_bbox = load_prompt("grounder_bbox.md")
         grounder_prompt_template_no_bbox = load_prompt("grounder_coordinates.md")
         decider_prompt_template = load_prompt("decider_v2.md")
-
-    orig_task = task
-    executing_subtask = False
-    replay_idx = 0
 
     # 重置搜索栏匹配标志(防止跨任务状态泄漏)
     global flag
@@ -731,8 +721,6 @@ def task_in_app(
 
         # 初始化本步变量(防止未定义)
         image_index = len(actions) + 1
-        replay_this_step = False
-        replay_grounder_bbox = None
 
         if len(history) == 0:
             history_str = "(No history)"
@@ -742,66 +730,65 @@ def task_in_app(
             )
         screenshot_resize = get_screenshot(device, device_type)
 
-        if not replay_this_step:
-            decider_prompt = decider_prompt_template.format(
-                task=task, history=history_str
-            )
-            print(f"Decider prompt: \n{decider_prompt}")
+        decider_prompt = decider_prompt_template.format(
+            task=task, history=history_str
+        )
+        print(f"Decider prompt: \n{decider_prompt}")
 
-            decider_start_time = time.time()
+        decider_start_time = time.time()
 
-            if use_local_llm_decider:
-                with tempfile.NamedTemporaryFile(
-                    suffix=".png", delete=False, dir="."
-                ) as tmp_img:
-                    tmp_img_path = tmp_img.name
-                    src_path = (
-                        "screenshot-Android.jpg"
-                        if device_type == "Android"
-                        else "screenshot-Harmony.jpg"
-                    )
-                    img = Image.open(src_path)
-                    img.save(tmp_img_path, "PNG")
-                try:
-                    decider_response_str = local_llm_generate(
-                        decider_prompt, tmp_img_path
-                    )
-                finally:
-                    if os.path.exists(tmp_img_path):
-                        os.remove(tmp_img_path)
-            else:
-                decider_response_obj = decider_client.chat.completions.create(
-                    model=decider_model,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{screenshot_resize}"
-                                    },
-                                },
-                                {"type": "text", "text": decider_prompt},
-                            ],
-                        }
-                    ],
-                    temperature=0,
-                    response_format={
-                        "type": "json_object",
-                        "schema": json_schema,
-                    },
+        if use_local_llm_decider:
+            with tempfile.NamedTemporaryFile(
+                suffix=".png", delete=False, dir="."
+            ) as tmp_img:
+                tmp_img_path = tmp_img.name
+                src_path = (
+                    "screenshot-Android.jpg"
+                    if device_type == "Android"
+                    else "screenshot-Harmony.jpg"
                 )
-                decider_response_str = decider_response_obj.choices[0].message.content
+                img = Image.open(src_path)
+                img.save(tmp_img_path, "PNG")
+            try:
+                decider_response_str = local_llm_generate(
+                    decider_prompt, tmp_img_path
+                )
+            finally:
+                if os.path.exists(tmp_img_path):
+                    os.remove(tmp_img_path)
+        else:
+            decider_response_obj = decider_client.chat.completions.create(
+                model=decider_model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{screenshot_resize}"
+                                },
+                            },
+                            {"type": "text", "text": decider_prompt},
+                        ],
+                    }
+                ],
+                temperature=0,
+                response_format={
+                    "type": "json_object",
+                    "schema": json_schema,
+                },
+            )
+            decider_response_str = decider_response_obj.choices[0].message.content
 
-            decider_end_time = time.time()
-            print(f"Decider time taken: {decider_end_time - decider_start_time} seconds")
-            print(f"Decider response: \n{decider_response_str}")
+        decider_end_time = time.time()
+        print(f"Decider time taken: {decider_end_time - decider_start_time} seconds")
+        print(f"Decider response: \n{decider_response_str}")
 
         decider_response = robust_json_loads(decider_response_str)
         action = decider_response["action"]
 
-        if not (executing_subtask and action == "done"):
+        if action != "done":
             converted_item = {
                 "reasoning": decider_response["reasoning"],
                 "function": {
@@ -850,7 +837,6 @@ def task_in_app(
                     logging.warning("Failed to parse hierarchy as JSON, saving as plain text")
                     with open(hierarchy_path, "w", encoding="utf-8") as f:
                         f.write(str(hierarchy))
-            full_history.append(decider_response_str)
 
         history.append(decider_response_str)
         if action == "done":
@@ -858,120 +844,114 @@ def task_in_app(
             actions.append({"type": "done", "action_index": image_index})
             break
         elif action == "click":
-            if replay_grounder_bbox is None:
-                reasoning = decider_response["reasoning"]
-                target_element = decider_response["parameters"]["target_element"]
-                grounder_prompt = (
-                    grounder_prompt_template_bbox
-                    if bbox_flag
-                    else grounder_prompt_template_no_bbox
-                ).format(reasoning=reasoning, description=target_element)
+            reasoning = decider_response["reasoning"]
+            target_element = decider_response["parameters"]["target_element"]
+            grounder_prompt = (
+                grounder_prompt_template_bbox
+                if bbox_flag
+                else grounder_prompt_template_no_bbox
+            ).format(reasoning=reasoning, description=target_element)
 
             if bbox_flag:
-                if replay_grounder_bbox is None:
-                    reasoning = decider_response["reasoning"]
-                    target_element = decider_response["parameters"]["target_element"]
-
-                    xml_path = os.path.join(data_dir, f"{image_index}.xml")
-                    try:
-                        root = load_and_parse_xml(xml_path)
-                        bbox = find_best_match_node(root, target_element)
-                        if use_grounder:
-                            bbox = None
-                        if bbox is None:
-                            grounder_start_time = time.time()
-                            if use_local_llm_grounder:
-                                with tempfile.NamedTemporaryFile(
-                                    suffix=".png", delete=False, dir="."
-                                ) as tmp_img:
-                                    tmp_grounder_img_path = tmp_img.name
-                                    src_path = (
-                                        "screenshot-Android.jpg"
-                                        if device_type == "Android"
-                                        else "screenshot-Harmony.jpg"
-                                    )
-                                    img = Image.open(src_path)
-                                    img.save(tmp_grounder_img_path, "PNG")
-                                try:
-                                    grounder_response_str = local_llm_generate(
-                                        grounder_prompt, tmp_grounder_img_path
-                                    )
-                                finally:
-                                    if os.path.exists(tmp_grounder_img_path):
-                                        os.remove(tmp_grounder_img_path)
-                            else:
-                                grounder_response_obj = grounder_client.chat.completions.create(
-                                    model=grounder_model,
-                                    messages=[
-                                        {
-                                            "role": "user",
-                                            "content": [
-                                                {
-                                                    "type": "image_url",
-                                                    "image_url": {
-                                                        "url": f"data:image/jpeg;base64,{screenshot_resize}"
-                                                    },
+                xml_path = os.path.join(data_dir, f"{image_index}.xml")
+                try:
+                    root = load_and_parse_xml(xml_path)
+                    # use_grounder=True 时跳过 XML 匹配,直接用 grounder
+                    # use_grounder=False 时优先 XML 匹配,失败再回退 grounder
+                    bbox = None if use_grounder else find_best_match_node(
+                        root, target_element
+                    )
+                    if bbox is None:
+                        grounder_start_time = time.time()
+                        if use_local_llm_grounder:
+                            with tempfile.NamedTemporaryFile(
+                                suffix=".png", delete=False, dir="."
+                            ) as tmp_img:
+                                tmp_grounder_img_path = tmp_img.name
+                                src_path = (
+                                    "screenshot-Android.jpg"
+                                    if device_type == "Android"
+                                    else "screenshot-Harmony.jpg"
+                                )
+                                img = Image.open(src_path)
+                                img.save(tmp_grounder_img_path, "PNG")
+                            try:
+                                grounder_response_str = local_llm_generate(
+                                    grounder_prompt, tmp_grounder_img_path
+                                )
+                            finally:
+                                if os.path.exists(tmp_grounder_img_path):
+                                    os.remove(tmp_grounder_img_path)
+                        else:
+                            grounder_response_obj = grounder_client.chat.completions.create(
+                                model=grounder_model,
+                                messages=[
+                                    {
+                                        "role": "user",
+                                        "content": [
+                                            {
+                                                "type": "image_url",
+                                                "image_url": {
+                                                    "url": f"data:image/jpeg;base64,{screenshot_resize}"
                                                 },
-                                                {
-                                                    "type": "text",
-                                                    "text": grounder_prompt,
-                                                },
-                                            ],
-                                        }
-                                    ],
-                                    temperature=0,
-                                )
-                                grounder_response_str = (
-                                    grounder_response_obj.choices[0].message.content
-                                )
+                                            },
+                                            {
+                                                "type": "text",
+                                                "text": grounder_prompt,
+                                            },
+                                        ],
+                                    }
+                                ],
+                                temperature=0,
+                            )
+                            grounder_response_str = (
+                                grounder_response_obj.choices[0].message.content
+                            )
 
-                            grounder_end_time = time.time()
-                            print(
-                                f"Grounder time taken: {grounder_end_time - grounder_start_time} seconds"
-                            )
-                            print(f"Grounder response: \n{grounder_response_str}")
-                            grounder_response = parse_json_response(
-                                grounder_response_str
-                            )
-                            bbox = (
-                                grounder_response["bbox"]
-                                if "bbox" in grounder_response
-                                else None
-                            )
-                            bbox_2d = (
-                                grounder_response["bbox_2d"]
-                                if "bbox_2d" in grounder_response
-                                else None
-                            )
-                            bbox_2d_ = grounder_response.get("bbox-2d", None)
-                            bbox_2D = grounder_response.get("bbox_2D", None)
-                            if bbox_2D is not None:
-                                bbox = bbox_2D
-                            if bbox_2d_ is not None:
-                                bbox = bbox_2d_
-                            if bbox_2d is not None:
-                                bbox = bbox_2d
+                        grounder_end_time = time.time()
+                        print(
+                            f"Grounder time taken: {grounder_end_time - grounder_start_time} seconds"
+                        )
+                        print(f"Grounder response: \n{grounder_response_str}")
+                        grounder_response = parse_json_response(
+                            grounder_response_str
+                        )
+                        bbox = (
+                            grounder_response["bbox"]
+                            if "bbox" in grounder_response
+                            else None
+                        )
+                        bbox_2d = (
+                            grounder_response["bbox_2d"]
+                            if "bbox_2d" in grounder_response
+                            else None
+                        )
+                        bbox_2d_ = grounder_response.get("bbox-2d", None)
+                        bbox_2D = grounder_response.get("bbox_2D", None)
+                        if bbox_2D is not None:
+                            bbox = bbox_2D
+                        if bbox_2d_ is not None:
+                            bbox = bbox_2d_
+                        if bbox_2d is not None:
+                            bbox = bbox_2d
 
-                            if use_qwen3:
-                                bbox = convert_qwen3_coordinates_to_absolute(
-                                    bbox, img.width, img.height, is_bbox=True
-                                )
-                            else:
-                                bbox = [
-                                    int(coord / factor) for coord in bbox
-                                ]
-                        x1, y1, x2, y2 = bbox
-                        print(
-                            f"Matched UI element via XML: text='{target_element}' → bounds={bbox}"
-                        )
-                    except Exception as e:
-                        print(
-                            f"Failed to find element via XML, falling back to grounder (if needed): {e}"
-                        )
-                        raise e
-                else:
-                    print(f"Using replayed grounder bbox: {replay_grounder_bbox}")
-                    x1, y1, x2, y2 = replay_grounder_bbox
+                        if use_qwen3:
+                            bbox = convert_qwen3_coordinates_to_absolute(
+                                bbox, img.width, img.height, is_bbox=True
+                            )
+                        else:
+                            bbox = [
+                                int(coord / factor) for coord in bbox
+                            ]
+                    x1, y1, x2, y2 = bbox
+                    print(
+                        f"Matched UI element via XML: text='{target_element}' → bounds={bbox}"
+                    )
+                except Exception as e:
+                    print(
+                        f"Failed to find element via XML, falling back to grounder (if needed): {e}"
+                    )
+                    raise e
 
                 print(f"Clicking on bbox: [{x1}, {y1}, {x2}, {y2}]")
                 print(f"Image size: width={img.width}, height={img.height}")
@@ -1142,8 +1122,6 @@ def task_in_app(
 
         time.sleep(1)
 
-    task = orig_task
-
 
 def parse_planner_response(response_str: str):
     pattern = re.compile(r"```json\s*(.*?)\s*```", re.DOTALL)
@@ -1306,7 +1284,13 @@ if __name__ == "__main__":
         choices=["Android", "Harmony"],
     )
     parser.add_argument("--device_endpoint", type=str, default=None)
-    parser.add_argument("--use_qwen3", action="store_true", default=True)
+    # BooleanOptionalAction (Python 3.9+): 自动生成 --use_qwen3 / --no-use_qwen3
+    parser.add_argument(
+        "--use_qwen3",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="使用 Qwen3 坐标系 (默认开启,用 --no-use_qwen3 关闭)",
+    )
     parser.add_argument("--use_experience", action="store_true", default=False)
     parser.add_argument("--use_experience_rr", action="store_true", default=False)
     parser.add_argument("--data_dir", type=str, default=None)
@@ -1314,7 +1298,12 @@ if __name__ == "__main__":
     parser.add_argument("--local_planner", action="store_true")
     parser.add_argument("--local_grounder", action="store_true")
     parser.add_argument("--local_decider", action="store_true")
-    parser.add_argument("--use_grounder", action="store_true", default=True)
+    parser.add_argument(
+        "--use_grounder",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="使用 grounder 模型定位 (默认开启,用 --no-use_grounder 关闭,关闭时优先 XML 匹配)",
+    )
 
     args = parser.parse_args()
 
@@ -1436,7 +1425,7 @@ if __name__ == "__main__":
             )
             print(f"Planner result - App: {app_name}, Package: {package_name}")
 
-            if use_experience == True:
+            if use_experience:
                 print(f"Using experience: using planner-rewritten task description")
                 new_task_description = planner_task_description
                 print(f"New task description: {new_task_description}")
@@ -1448,7 +1437,6 @@ if __name__ == "__main__":
             device.app_start(package_name)
             task_in_app(
                 app_name,
-                task_description,
                 new_task_description,
                 device,
                 data_dir,
