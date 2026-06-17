@@ -232,71 +232,74 @@ class LLMBackend:
 MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
     "minicpm-v-4.6": {
         "name": "MiniCPM-V 4.6",
-        "repo": "openbmb/MiniCPM-V-4.6-GGUF",
+        "repo": "openbmb/MiniCPM-V-4.6-gguf",
         "files": {
             "model": "MiniCPM-V-4.6-Q4_K_M.gguf",
-            "mmproj": "mmproj-model-f16.gguf",
+            "mmproj": "mmproj-MiniCPM-V-4.6-F16.gguf",
         },
         "size_gb": 1.3,
         "ram_gb": 4,
         "license": "Apache-2.0",
         "source": "huggingface",
         "is_vision": True,
-        "description": "面壁智能+清华,1.3B 同尺寸 SOTA,4GB RAM 可跑",
+        "description": "面壁智能+清华,Qwen3.5-0.8B+SigLIP2,1.3B 同尺寸 SOTA,4GB RAM",
     },
-    "qwen3.5-4b": {
-        "name": "Qwen3.5-4B-Instruct",
-        "repo": "unsloth/Qwen3.5-4B-Instruct-GGUF",
+    "qwen3.5-0.8b": {
+        "name": "Qwen3.5-0.8B",
+        "repo": "unsloth/Qwen3.5-0.8B-GGUF",
         "files": {
-            "model": "Qwen3.5-4B-Instruct-UD-Q4_K_XL.gguf",
+            "model": "Qwen3.5-0.8B-UD-Q4_K_XL.gguf",
+            "mmproj": "mmproj-BF16.gguf",
         },
-        "size_gb": 2.5,
-        "ram_gb": 6,
+        "size_gb": 0.6,
+        "ram_gb": 3,
         "license": "Apache-2.0",
         "source": "huggingface",
-        "is_vision": False,
-        "description": "阿里 Qwen3.5,Unsloth 动态量化,6GB RAM",
+        "is_vision": True,
+        "description": "Qwen3.5 最小尺寸,原生多模态,3GB RAM 极致小",
     },
     "qwen3.5-2b": {
-        "name": "Qwen3.5-2B-Instruct",
-        "repo": "unsloth/Qwen3.5-2B-Instruct-GGUF",
+        "name": "Qwen3.5-2B",
+        "repo": "unsloth/Qwen3.5-2B-GGUF",
         "files": {
-            "model": "Qwen3.5-2B-Instruct-UD-Q4_K_XL.gguf",
+            "model": "Qwen3.5-2B-UD-Q4_K_XL.gguf",
+            "mmproj": "mmproj-BF16.gguf",
         },
         "size_gb": 1.5,
         "ram_gb": 4,
         "license": "Apache-2.0",
         "source": "huggingface",
-        "is_vision": False,
-        "description": "Qwen3.5 小尺寸,4GB RAM 可跑",
+        "is_vision": True,
+        "description": "Qwen3.5 原生多模态(图+视频+文本),4GB RAM",
     },
-    "gemma4-e2b": {
-        "name": "Gemma 4 E2B",
-        "repo": "google/gemma-4-e2b-it-GGUF",
+    "qwen3.5-4b": {
+        "name": "Qwen3.5-4B",
+        "repo": "unsloth/Qwen3.5-4B-GGUF",
         "files": {
-            "model": "gemma-4-e2b-it-Q4_K_M.gguf",
-            "mmproj": "mmproj-model-f16.gguf",
+            "model": "Qwen3.5-4B-UD-Q4_K_XL.gguf",
+            "mmproj": "mmproj-BF16.gguf",
         },
-        "size_gb": 1.2,
-        "ram_gb": 3,
+        "size_gb": 2.5,
+        "ram_gb": 6,
         "license": "Apache-2.0",
         "source": "huggingface",
         "is_vision": True,
-        "description": "Google Gemma 4,158 tok/s,3GB RAM 极致小",
+        "description": "Qwen3.5 原生多模态,Unsloth 动态量化,6GB RAM",
     },
-    "gui-owl-1.5-8b": {
-        "name": "GUI-Owl-1.5-8B-Instruct",
-        "repo": "mPLUG/GUI-Owl-1.5-8B-Instruct-GGUF",
+    "gui-owl-7b": {
+        "name": "GUI-Owl-7B (需自转GGUF)",
+        "repo": "mPLUG/GUI-Owl-7B",
         "files": {
-            "model": "GUI-Owl-1.5-8B-Instruct-Q4_K_M.gguf",
-            "mmproj": "mmproj-model-f16.gguf",
+            "model": "GUI-Owl-7B-Q4_K_M.gguf",
+            "mmproj": "mmproj-F16.gguf",
         },
         "size_gb": 5.0,
         "ram_gb": 10,
         "license": "MIT",
         "source": "huggingface",
         "is_vision": True,
-        "description": "通义 GUI-Owl 1.5,AndroidWorld 71.6%,GUI 专精",
+        "description": "通义 GUI-Owl,GUI 自动化 SOTA,需用 convert_hf_to_gguf.py 自行转换",
+        "note": "此模型无官方GGUF,需从safetensors自行转换: python convert_hf_to_gguf.py mPLUG/GUI-Owl-7B --mmproj",
     },
 }
 
@@ -314,13 +317,13 @@ def get_model_info(model_name: str) -> Dict[str, Any]:
 def auto_select_model(ram_gb: int) -> str:
     """根据 RAM 自动选择模型"""
     if ram_gb < 4:
-        return "gemma4-e2b"
+        return "qwen3.5-0.8b"
     elif ram_gb < 6:
         return "minicpm-v-4.6"
     elif ram_gb < 10:
         return "qwen3.5-4b"
     else:
-        return "gui-owl-1.5-8b"
+        return "gui-owl-7b"
 
 
 def get_ram_gb() -> int:

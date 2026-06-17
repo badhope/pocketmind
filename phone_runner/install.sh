@@ -149,53 +149,55 @@ select_model() {
         info "自动选择模型 (RAM=${RAM_GB}GB)..."
 
         if [ $RAM_GB -lt 4 ]; then
-            MODEL="gemma4-e2b"
+            MODEL="qwen3.5-0.8b"
         elif [ $RAM_GB -lt 6 ]; then
             MODEL="minicpm-v-4.6"
         elif [ $RAM_GB -lt 10 ]; then
             MODEL="qwen3.5-4b"
         else
-            MODEL="gui-owl-1.5-8b"
+            MODEL="gui-owl-7b"
         fi
     fi
 
     info "选定模型: ${MODEL}"
 
-    # 模型信息
+    # 模型信息(已联网验证 2026-06)
     case "$MODEL" in
         minicpm-v-4.6)
-            MODEL_REPO="openbmb/MiniCPM-V-4.6-GGUF"
+            MODEL_REPO="openbmb/MiniCPM-V-4.6-gguf"
             MODEL_FILE="MiniCPM-V-4.6-Q4_K_M.gguf"
-            MMPROJ_FILE="mmproj-model-f16.gguf"
+            MMPROJ_FILE="mmproj-MiniCPM-V-4.6-F16.gguf"
             MODEL_SIZE_GB="1.3"
             ;;
+        qwen3.5-0.8b)
+            MODEL_REPO="unsloth/Qwen3.5-0.8B-GGUF"
+            MODEL_FILE="Qwen3.5-0.8B-UD-Q4_K_XL.gguf"
+            MMPROJ_FILE="mmproj-BF16.gguf"
+            MODEL_SIZE_GB="0.6"
+            ;;
         qwen3.5-2b)
-            MODEL_REPO="unsloth/Qwen3.5-2B-Instruct-GGUF"
-            MODEL_FILE="Qwen3.5-2B-Instruct-UD-Q4_K_XL.gguf"
-            MMPROJ_FILE=""
+            MODEL_REPO="unsloth/Qwen3.5-2B-GGUF"
+            MODEL_FILE="Qwen3.5-2B-UD-Q4_K_XL.gguf"
+            MMPROJ_FILE="mmproj-BF16.gguf"
             MODEL_SIZE_GB="1.5"
             ;;
         qwen3.5-4b)
-            MODEL_REPO="unsloth/Qwen3.5-4B-Instruct-GGUF"
-            MODEL_FILE="Qwen3.5-4B-Instruct-UD-Q4_K_XL.gguf"
-            MMPROJ_FILE=""
+            MODEL_REPO="unsloth/Qwen3.5-4B-GGUF"
+            MODEL_FILE="Qwen3.5-4B-UD-Q4_K_XL.gguf"
+            MMPROJ_FILE="mmproj-BF16.gguf"
             MODEL_SIZE_GB="2.5"
             ;;
-        gemma4-e2b)
-            MODEL_REPO="google/gemma-4-e2b-it-GGUF"
-            MODEL_FILE="gemma-4-e2b-it-Q4_K_M.gguf"
-            MMPROJ_FILE="mmproj-model-f16.gguf"
-            MODEL_SIZE_GB="1.2"
-            ;;
-        gui-owl-1.5-8b)
-            MODEL_REPO="mPLUG/GUI-Owl-1.5-8B-Instruct-GGUF"
-            MODEL_FILE="GUI-Owl-1.5-8B-Instruct-Q4_K_M.gguf"
-            MMPROJ_FILE="mmproj-model-f16.gguf"
+        gui-owl-7b)
+            warn "GUI-Owl-7B 无官方 GGUF,需从 safetensors 自行转换"
+            warn "参考: python convert_hf_to_gguf.py mPLUG/GUI-Owl-7B --mmproj"
+            MODEL_REPO="mPLUG/GUI-Owl-7B"
+            MODEL_FILE="GUI-Owl-7B-Q4_K_M.gguf"
+            MMPROJ_FILE="mmproj-F16.gguf"
             MODEL_SIZE_GB="5.0"
             ;;
         *)
             error "未知模型: $MODEL"
-            error "可用: minicpm-v-4.6, qwen3.5-2b, qwen3.5-4b, gemma4-e2b, gui-owl-1.5-8b"
+            error "可用: minicpm-v-4.6, qwen3.5-0.8b, qwen3.5-2b, qwen3.5-4b, gui-owl-7b"
             exit 1
             ;;
     esac
@@ -309,7 +311,7 @@ print_usage() {
     echo "手动指定模型:"
     echo "  python mobiagent.py --model minicpm-v-4.6"
     echo "  python mobiagent.py --model qwen3.5-4b"
-    echo "  python mobiagent.py --model gui-owl-1.5-8b"
+    echo "  python mobiagent.py --model gui-owl-7b"
     echo ""
     echo "使用自定义模型路径:"
     echo "  python mobiagent.py --model-path /path/to/model.gguf"

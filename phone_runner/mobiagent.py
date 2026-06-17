@@ -1270,7 +1270,7 @@ if __name__ == "__main__":
         "--model",
         type=str,
         default="auto",
-        help="模型名称 (auto/minicpm-v-4.6/qwen3.5-2b/qwen3.5-4b/gemma4-e2b/gui-owl-1.5-8b)",
+        help="模型名称 (auto/minicpm-v-4.6/qwen3.5-0.8b/qwen3.5-2b/qwen3.5-4b/gui-owl-7b/cloud)",
     )
     parser.add_argument(
         "--model-path", type=str, default=None, help="直接指定 GGUF 模型文件路径"
