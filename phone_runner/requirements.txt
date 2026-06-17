@@ -1,0 +1,7 @@
+# MobiAgent phone_runner Python 依赖
+openai>=1.0.0
+requests>=2.28.0
+Pillow>=9.0.0
+uiautomator2>=2.16.0
+pydantic>=2.0.0
+pyyaml>=6.0

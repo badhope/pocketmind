@@ -1,0 +1,100 @@
+# MobiAgent phone_runner 配置文件
+# 模型注册表和自动选择规则
+
+# 默认模型(用最小的)
+default_model: "minicpm-v-4.6"
+
+# llama-server 配置
+server:
+  port: 8080
+  host: "127.0.0.1"
+  ctx_size: 4096
+  n_gpu_layers: 0        # Termux 用 CPU
+  n_threads: null         # null = 自动检测
+  startup_timeout: 60     # 启动超时(秒)
+
+# 模型注册表
+models:
+  minicpm-v-4.6:
+    name: "MiniCPM-V 4.6"
+    repo: "openbmb/MiniCPM-V-4.6-GGUF"
+    files:
+      model: "MiniCPM-V-4.6-Q4_K_M.gguf"
+      mmproj: "mmproj-model-f16.gguf"
+    size_gb: 1.3
+    ram_gb: 4
+    license: "Apache-2.0"
+    source: "huggingface"
+    is_vision: true
+    description: "面壁智能+清华,1.3B 同尺寸 SOTA,4GB RAM 可跑"
+
+  qwen3.5-2b:
+    name: "Qwen3.5-2B-Instruct"
+    repo: "unsloth/Qwen3.5-2B-Instruct-GGUF"
+    files:
+      model: "Qwen3.5-2B-Instruct-UD-Q4_K_XL.gguf"
+    size_gb: 1.5
+    ram_gb: 4
+    license: "Apache-2.0"
+    source: "huggingface"
+    is_vision: false
+    description: "Qwen3.5 小尺寸,4GB RAM 可跑"
+
+  qwen3.5-4b:
+    name: "Qwen3.5-4B-Instruct"
+    repo: "unsloth/Qwen3.5-4B-Instruct-GGUF"
+    files:
+      model: "Qwen3.5-4B-Instruct-UD-Q4_K_XL.gguf"
+    size_gb: 2.5
+    ram_gb: 6
+    license: "Apache-2.0"
+    source: "huggingface"
+    is_vision: false
+    description: "阿里 Qwen3.5,Unsloth 动态量化,6GB RAM"
+
+  gemma4-e2b:
+    name: "Gemma 4 E2B"
+    repo: "google/gemma-4-e2b-it-GGUF"
+    files:
+      model: "gemma-4-e2b-it-Q4_K_M.gguf"
+      mmproj: "mmproj-model-f16.gguf"
+    size_gb: 1.2
+    ram_gb: 3
+    license: "Apache-2.0"
+    source: "huggingface"
+    is_vision: true
+    description: "Google Gemma 4,158 tok/s,3GB RAM 极致小"
+
+  gui-owl-1.5-8b:
+    name: "GUI-Owl-1.5-8B-Instruct"
+    repo: "mPLUG/GUI-Owl-1.5-8B-Instruct-GGUF"
+    files:
+      model: "GUI-Owl-1.5-8B-Instruct-Q4_K_M.gguf"
+      mmproj: "mmproj-model-f16.gguf"
+    size_gb: 5.0
+    ram_gb: 10
+    license: "MIT"
+    source: "huggingface"
+    is_vision: true
+    description: "通义 GUI-Owl 1.5,AndroidWorld 71.6%,GUI 专精"
+
+# 自动选择规则(按 RAM)
+auto_select:
+  ram_3gb: "gemma4-e2b"
+  ram_4gb: "minicpm-v-4.6"
+  ram_6gb: "qwen3.5-4b"
+  ram_10gb: "gui-owl-1.5-8b"
+
+# Agent 配置
+agent:
+  max_steps: 35
+  screenshot_format: "JPEG"
+  screenshot_quality: 85
+  step_delay: 1.0          # 每步间隔(秒)
+  inference_timeout: 180   # 推理超时(秒)
+
+# 模型下载镜像(国内加速)
+mirrors:
+  huggingface: "https://huggingface.co"
+  hf_mirror: "https://hf-mirror.com"
+  modelscope: "https://www.modelscope.cn"

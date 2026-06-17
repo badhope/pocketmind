@@ -1476,19 +1476,13 @@ public class MainActivity extends AppCompatActivity {
         
         try {
             if (screenshotManager == null) {
-                Log.e("MainActivity", "ScreenshotManager未初始化，尝试重新初始化");
-                responseBuilder.append("❌ 截图功能未初始化，正在重新初始化...");
-                
-                // 尝试重新初始化
-                try {
-                    screenshotManager = new ScreenshotManager(this);
-                    Log.d("MainActivity", "ScreenshotManager重新初始化成功");
-                    responseBuilder.append("\n✅ 重新初始化成功");
-                } catch (Exception e) {
-                    Log.e("MainActivity", "重新初始化ScreenshotManager失败: " + e.getMessage());
-                    responseBuilder.append("\n❌ 重新初始化失败，请重启应用");
-                    return false;
-                }
+                Log.e("MainActivity", "ScreenshotManager未初始化");
+                responseBuilder.append("❌ 截图功能未初始化，请重启应用");
+
+                // ScreenshotManager 构造函数调用 registerForActivityResult,
+                // 必须在主线程且 Activity STARTED 之前调用,不能在后台线程重建。
+                // 提示用户重启应用即可。
+                return false;
             }
             
             // 检查权限状态

@@ -1,7 +1,18 @@
+"""
+MobiAgent Phone Runner - 主程序
+使用 llama.cpp + GGUF 模型在 Android 设备上本地运行 GUI Agent
+
+用法:
+    python mobiagent.py --model minicpm-v-4.6
+    python mobiagent.py --model auto
+    python mobiagent.py --model-path /path/to/model.gguf
+    python mobiagent.py --list-models
+"""
+
 from openai import OpenAI
 import uiautomator2 as u2
 import base64
-from PIL import Image #pillow已有
+from PIL import Image
 import json
 import io
 import logging
@@ -9,67 +20,160 @@ from abc import ABC, abstractmethod
 import time
 import re
 import os
-import shutil
 import argparse
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 import textwrap
 
 from pathlib import Path
 import sys
-
-from pathlib import Path
-import requests
 import tempfile
 
+# 新:导入 LLM 后端
+from llm_backend import (
+    LlamaServer,
+    LLMBackend,
+    MODEL_REGISTRY,
+    get_model_info,
+    auto_select_model,
+    get_ram_gb,
+    resolve_model_path,
+)
+
+import yaml
+
+# ============================================================================
+# 配置加载
+# ============================================================================
+def load_config() -> dict:
+    """加载 config.yaml"""
+    config_path = Path(__file__).parent / "config.yaml"
+    if config_path.exists():
+        with open(config_path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
+    return {}
 
 
-MAX_STEPS = 35
+CONFIG = load_config()
 
-# SINGLETASK_STORAGE_DIR = Path(__file__).resolve().parent.parent.parent / "utils" / "experience" / "singletask_storage"
+# 从配置读取最大步数(默认 35)
+MAX_STEPS = CONFIG.get("agent", {}).get("max_steps", 35)
 
-LOCAL_LLM_SERVER_URL = "http://127.0.0.1:8080/generate"
+# ============================================================================
+# LLM 后端管理
+# ============================================================================
+_llm_server: LlamaServer = None
+_llm_backend: LLMBackend = None
+
+
+def init_local_llm(
+    model_name: str = "auto",
+    model_path: str = None,
+    mmproj_path: str = None,
+    port: int = None,
+    ctx_size: int = None,
+):
+    """
+    初始化本地 LLM 后端
+
+    Args:
+        model_name: 模型名称(auto 会自动选择)
+        model_path: 直接指定模型路径(优先)
+        mmproj_path: 视觉模型 mmproj 路径
+        port: llama-server 端口
+        ctx_size: 上下文长度
+    """
+    global _llm_server, _llm_backend
+
+    server_cfg = CONFIG.get("server", {})
+    port = port or server_cfg.get("port", 8080)
+    ctx_size = ctx_size or server_cfg.get("ctx_size", 4096)
+    n_gpu_layers = server_cfg.get("n_gpu_layers", 0)
+    n_threads = server_cfg.get("n_threads")
+    startup_timeout = server_cfg.get("startup_timeout", 60)
+
+    if model_path:
+        # 直接指定路径
+        _llm_server = LlamaServer(
+            model_path=model_path,
+            mmproj_path=mmproj_path,
+            port=port,
+            n_gpu_layers=n_gpu_layers,
+            ctx_size=ctx_size,
+            n_threads=n_threads,
+            startup_timeout=startup_timeout,
+        )
+    else:
+        # 从注册表选择
+        if model_name == "auto":
+            ram = get_ram_gb()
+            model_name = auto_select_model(ram)
+            print(f"自动选择模型: {model_name} (RAM={ram}GB)")
+
+        paths = resolve_model_path(model_name)
+        _llm_server = LlamaServer(
+            model_path=paths["model"],
+            mmproj_path=paths["mmproj"],
+            port=port,
+            n_gpu_layers=n_gpu_layers,
+            ctx_size=ctx_size,
+            n_threads=n_threads,
+            startup_timeout=startup_timeout,
+        )
+
+    print(f"启动 llama-server...")
+    _llm_server.start()
+
+    _llm_backend = LLMBackend(_llm_server)
+    print(f"LLM 后端就绪 (端口 {port})")
+
 
 def local_llm_generate(prompt: str, image_path: str = None) -> str:
     """
-    调用本地 LLM 服务，支持嵌入 <img> 标签。
+    调用本地 LLM 生成(兼容旧接口)
+
     Args:
-        prompt (str): 文本 prompt
-        image_path (str, optional): 本地图片路径
+        prompt: 文本 prompt
+        image_path: 可选图片路径
+
     Returns:
-        str: LLM 返回的原始响应字符串（JSON 格式）
+        模型生成的文本
     """
-    if image_path:
-        full_prompt = f"<img>{image_path}</img>{prompt}"
-    else:
-        full_prompt = prompt
+    if _llm_backend is None:
+        raise RuntimeError("LLM 后端未初始化,请先调用 init_local_llm()")
+    return _llm_backend.generate(prompt, image_path)
 
-    try:
-        response = requests.post(
-            LOCAL_LLM_SERVER_URL,
-            data={"prompt": full_prompt},
-            timeout=180
-        )
-        response.raise_for_status()
-        result = response.json()
-        return result.get("response", "")
-    except Exception as e:
-        logging.error(f"Local LLM request failed: {e}")
-        raise RuntimeError(f"LLM inference failed: {e}")
-def invalidate_singletask_storage():
-    """Remove cached single-task experience so each run starts clean."""
-    if SINGLETASK_STORAGE_DIR.exists():
-        shutil.rmtree(SINGLETASK_STORAGE_DIR)
-        print(f"Cleared singletask storage at: {SINGLETASK_STORAGE_DIR}")
-    else:
-        print(f"No singletask storage found at: {SINGLETASK_STORAGE_DIR}")
-    SINGLETASK_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Initialized empty singletask storage at: {SINGLETASK_STORAGE_DIR}")
 
+def shutdown_local_llm():
+    """关闭本地 LLM 服务"""
+    global _llm_server, _llm_backend
+    if _llm_server:
+        _llm_server.stop()
+        _llm_server = None
+        _llm_backend = None
+
+
+def list_models():
+    """列出所有可用模型"""
+    print("\n可用模型:")
+    print("-" * 70)
+    for name, info in MODEL_REGISTRY.items():
+        vision = "视觉" if info["is_vision"] else "纯文本"
+        print(f"  {name}")
+        print(f"    名称: {info['name']}")
+        print(f"    大小: {info['size_gb']} GB | RAM: {info['ram_gb']} GB | {vision}")
+        print(f"    协议: {info['license']}")
+        print(f"    说明: {info['description']}")
+        print()
+
+
+# ============================================================================
+# Device 抽象层(保持不变)
+# ============================================================================
 class Device(ABC):
     @abstractmethod
     def start_app(self, app):
         pass
-    
+
     @abstractmethod
     def app_stop(self, package_name):
         pass
@@ -98,6 +202,7 @@ class Device(ABC):
     def dump_hierarchy(self):
         pass
 
+
 class AndroidDevice(Device):
     def __init__(self, adb_endpoint=None):
         super().__init__()
@@ -119,7 +224,6 @@ class AndroidDevice(Device):
             "滴滴出行": "com.sdu.didi.psnger",
             "微信": "com.tencent.mm",
             "微博": "com.sina.weibo",
-            "携程": "ctrip.android.view",
             "华为商城": "com.vmall.client",
             "华为视频": "com.huawei.himovie",
             "华为音乐": "com.huawei.music",
@@ -127,7 +231,7 @@ class AndroidDevice(Device):
             "拼多多": "com.xunmeng.pinduoduo",
             "大众点评": "com.dianping.v1",
             "小红书": "com.xingin.xhs",
-            "浏览器": "com.microsoft.emmx"
+            "浏览器": "com.microsoft.emmx",
         }
 
     def start_app(self, app):
@@ -137,8 +241,10 @@ class AndroidDevice(Device):
         self.d.app_start(package_name, stop=True)
         time.sleep(1)
         if not self.d.app_wait(package_name, timeout=20):
-            raise RuntimeError(f"Failed to start app '{app}' with package '{package_name}'")
-    
+            raise RuntimeError(
+                f"Failed to start app '{app}' with package '{package_name}'"
+            )
+
     def app_start(self, package_name):
         self.d.app_start(package_name, stop=True)
         time.sleep(2)
@@ -157,18 +263,27 @@ class AndroidDevice(Device):
 
     def input(self, text):
         current_ime = self.d.current_ime()
-        self.d.shell(['settings', 'put', 'secure', 'default_input_method', 'com.android.adbkeyboard/.AdbIME'])
+        self.d.shell(
+            [
+                "settings",
+                "put",
+                "secure",
+                "default_input_method",
+                "com.android.adbkeyboard/.AdbIME",
+            ]
+        )
         time.sleep(0.5)
-        charsb64 = base64.b64encode(text.encode('utf-8')).decode('utf-8')
-        self.d.shell(['am', 'broadcast', '-a', 'ADB_INPUT_B64', '--es', 'msg', charsb64])
+        charsb64 = base64.b64encode(text.encode("utf-8")).decode("utf-8")
+        self.d.shell(
+            ["am", "broadcast", "-a", "ADB_INPUT_B64", "--es", "msg", charsb64]
+        )
         time.sleep(0.5)
-        self.d.shell(['settings', 'put', 'secure', 'default_input_method', current_ime])
+        self.d.shell(["settings", "put", "secure", "default_input_method", current_ime])
         time.sleep(0.5)
         self.d.press("back")
         time.sleep(0.2)
 
     def swipe(self, direction, scale=0.5):
-        # self.d.swipe_ext(direction, scale)
         self.d.swipe_ext(direction=direction, scale=scale)
 
     def keyevent(self, key):
@@ -178,35 +293,41 @@ class AndroidDevice(Device):
         return self.d.dump_hierarchy()
 
 
-
+# ============================================================================
+# 云端客户端(保留兼容)
+# ============================================================================
 decider_client = None
 grounder_client = None
 planner_client = None
 
-# planner_model = "gemini-2.5-flash"
-planner_model = ""
-decider_model = ""
-grounder_model = ""
-
-# experience_rr: ExperienceRR = None
-
-# 全局偏好提取器
-# preference_extractor = None
-
+planner_model = "planner"
+decider_model = "decider"
+grounder_model = "grounder"
 
 use_local_llm_planner = False
 use_local_llm_grounder = False
 use_local_llm_decider = False
-def init(service_ip, decider_port, grounder_port, planner_port, enable_user_profile=False, use_graphrag=False, use_experience_rr=False, use_local_planner=False, use_local_grounder=False, use_local_decider=False):
-    global decider_client, grounder_client, planner_client, use_local_llm_planner, use_local_llm_grounder, use_local_llm_decider
+
+
+def init(
+    service_ip,
+    decider_port,
+    grounder_port,
+    planner_port,
+    enable_user_profile=False,
+    use_graphrag=False,
+    use_experience_rr=False,
+    use_local_planner=False,
+    use_local_grounder=False,
+    use_local_decider=False,
+):
+    global decider_client, grounder_client, planner_client
+    global use_local_llm_planner, use_local_llm_grounder, use_local_llm_decider
+
     use_local_llm_planner = use_local_planner
     use_local_llm_grounder = use_local_grounder
     use_local_llm_decider = use_local_decider
-    # , general_client, general_model, apps, preference_extractor, experience_rr
-    
-    # 加载环境变量
-    env_path = Path(__file__).parent / ".env"
-    # # load_dotenv(env_path) 
+
     if not use_local_llm_decider:
         decider_client = OpenAI(
             api_key="0",
@@ -224,20 +345,15 @@ def init(service_ip, decider_port, grounder_port, planner_port, enable_user_prof
         )
 
 
-    
 # 截图缩放比例
 factor = 1
-
 
 from pydantic import BaseModel, Field
 from typing import Any, Literal, Dict, Optional, Union
 from enum import Enum
 
-# 1. 使用 Enum 定义固定的动作类型
+
 class ActionType(str, Enum):
-    """
-    定义了所有可能的用户界面动作。
-    """
     CLICK = "click"
     INPUT = "input"
     SWIPE = "swipe"
@@ -246,116 +362,77 @@ class ActionType(str, Enum):
     TERMINATE = "terminate"
     WAIT = "wait"
 
-# 2. 编写 ActionPlan 模型
+
 class ActionPlan(BaseModel):
-    """
-    定义一个包含推理、动作和参数的结构化计划。
-    """
-    reasoning: str = Field(
-        description="描述执行此动作的思考过程和理由。"
-    )
-    
-    action: ActionType = Field(
-        description="要执行的下一个动作。"
-    )
-    
+    reasoning: str = Field(description="描述执行此动作的思考过程和理由。")
+    action: ActionType = Field(description="要执行的下一个动作。")
     parameters: Dict[str, str] = Field(
-        description="执行动作所需要的参数，以键值对形式提供。",
-        default_factory=dict  # 如果没有参数，默认为空字典
+        description="执行动作所需要的参数,以键值对形式提供。",
+        default_factory=dict,
     )
 
 
-# 2. 从 Pydantic 模型生成 JSON Schema
 json_schema = ActionPlan.model_json_schema()
 
+
 class GroundResponse(BaseModel):
-    coordinates: list[int] = Field(
-        description="点击坐标 [x, y]",
-        default=None
+    coordinates: list[int] = Field(description="点击坐标 [x, y]", default=None)
+    bbox: list[int] = Field(description="边界框 [x1, y1, x2, y2]", default=None)
+    bbox_2d: list[int] = Field(
+        description="边界框 [x1, y1, x2, y2]", default=None
     )
-    bbox: list[int] = Field(
-        description="边界框 [x1, y1, x2, y2]",
-        default=None
-    )
-    bbox_2d: list[int] = Field(description="边界框 [x1, y1, x2, y2]",
-        default=None
-    )
+
 
 json_schema_ground = GroundResponse.model_json_schema()
 
 
+# ============================================================================
+# 工具函数(保持不变)
+# ============================================================================
 def parse_json_response(response_str: str) -> dict:
-    """解析JSON响应
-    
-    Args:
-        response_str: 模型返回的响应字符串
-        
-    Returns:
-        解析后的JSON对象
-    """
     print("Parsing JSON response...")
     try:
-        # 尝试直接解析JSON
         return json.loads(response_str)
     except json.JSONDecodeError:
-        # 如果直接解析失败，尝试提取JSON部分
         try:
-            # 查找JSON代码块
-            json_match = re.search(r'```json\s*(\{.*?\})\s*```', response_str, re.DOTALL)
+            json_match = re.search(
+                r"```json\s*(\{.*?\})\s*```", response_str, re.DOTALL
+            )
             if json_match:
                 return json.loads(json_match.group(1))
-            
-            # 查找花括号包围的JSON
-            json_match = re.search(r'(\{.*?\})', response_str, re.DOTALL)
+
+            json_match = re.search(r"(\{.*?\})", response_str, re.DOTALL)
             if json_match:
                 return json.loads(json_match.group(1))
-            
+
             raise ValueError("无法在响应中找到有效的JSON")
         except Exception as e:
             logging.error(f"JSON解析失败: {e}")
             logging.error(f"原始响应: {response_str}")
             raise ValueError(f"无法解析JSON响应: {e}")
 
+
 def get_screenshot(device, device_type="Android"):
-    """
-    获取设备截图并编码为base64
-    
-    Args:
-        device: 设备对象
-        device_type: 设备类型，"Android" 或 "Harmony"
-        
-    Returns:
-        Base64编码的截图字符串
-    """
-    # 根据设备类型使用不同的截图路径，避免冲突
     if device_type == "Android":
         screenshot_path = "screenshot-Android.jpg"
     else:
         screenshot_path = "screenshot-Harmony.jpg"
     device.screenshot(screenshot_path)
-    # resize the screenshot to reduce the size for processing
     img = Image.open(screenshot_path)
-    img = img.resize((int(img.width * factor), int(img.height * factor)), Image.Resampling.LANCZOS)
+    img = img.resize(
+        (int(img.width * factor), int(img.height * factor)),
+        Image.Resampling.LANCZOS,
+    )
     buffered = io.BytesIO()
     img.save(buffered, format="JPEG")
     screenshot = base64.b64encode(buffered.getvalue()).decode("utf-8")
     return screenshot
 
-def convert_qwen3_coordinates_to_absolute(bbox_or_coords, img_width, img_height, is_bbox=True):
-    """
-    将 Qwen3 模型返回的相对坐标（0-1000范围）转换为绝对坐标
-    
-    Args:
-        bbox_or_coords: 相对坐标或边界框，范围为 0-1000
-        img_width: 图像宽度
-        img_height: 图像高度
-        is_bbox: 是否为边界框（True）或坐标点（False）
-        
-    Returns:
-        转换后的绝对坐标或边界框
-    """
+
+def convert_qwen3_coordinates_to_absolute(
+    bbox_or_coords, img_width, img_height, is_bbox=True
+):
     if is_bbox:
-        # bbox: [x1, y1, x2, y2]
         x1, y1, x2, y2 = bbox_or_coords
         x1 = int(x1 / 1000 * img_width)
         x2 = int(x2 / 1000 * img_width)
@@ -363,30 +440,24 @@ def convert_qwen3_coordinates_to_absolute(bbox_or_coords, img_width, img_height,
         y2 = int(y2 / 1000 * img_height)
         return [x1, y1, x2, y2]
     else:
-        # coordinates: [x, y]
         x, y = bbox_or_coords
         x = int(x / 1000 * img_width)
         y = int(y / 1000 * img_height)
         return [x, y]
 
+
 def create_swipe_visualization(data_dir, image_index, direction):
-    """为滑动动作创建可视化图像"""
     try:
-        # 读取原始截图
         img_path = os.path.join(data_dir, f"{image_index}.jpg")
         if not os.path.exists(img_path):
             return
-            
-        img = cv2.imread(img_path)
-        if img is None:
-            return
-            
-        height, width = img.shape[:2]
-        
-        # 根据方向计算箭头起点和终点
+
+        img = Image.open(img_path)
+        width, height = img.size
+
         center_x, center_y = width // 2, height // 2
         arrow_length = min(width, height) // 4
-        
+
         if direction == "up":
             start_point = (center_x, center_y + arrow_length // 2)
             end_point = (center_x, center_y - arrow_length // 2)
@@ -401,32 +472,26 @@ def create_swipe_visualization(data_dir, image_index, direction):
             end_point = (center_x + arrow_length // 2, center_y)
         else:
             return
-            
-        # 绘制箭头
-        cv2.arrowedLine(img, start_point, end_point, (255, 0, 0), 8, tipLength=0.3)  # 蓝色箭头
-        
-        # 添加文字说明
-        font = cv2.FONT_HERSHEY_SIMPLEX
+
+        draw = ImageDraw.Draw(img)
+        draw.line(
+            [start_point, end_point], fill=(255, 0, 0), width=8
+        )
+
         text = f"SWIPE {direction.upper()}"
-        text_size = cv2.getTextSize(text, font, 1.5, 3)[0]
-        text_x = (width - text_size[0]) // 2
-        text_y = 50
-        cv2.putText(img, text, (text_x, text_y), font, 1.5, (255, 0, 0), 3)  # 蓝色文字
-        
-        # 保存可视化图像
+        draw.text((width // 2 - 80, 20), text, fill=(255, 0, 0))
+
         swipe_path = os.path.join(data_dir, f"{image_index}_swipe.jpg")
-        cv2.imwrite(swipe_path, img)
-        
+        img.save(swipe_path)
+
     except Exception as e:
         logging.warning(f"Failed to create swipe visualization: {e}")
 
 
-
-# 预处理增强健壮性
 def robust_json_loads(s):
     import re
+
     s = s.strip()
-    # 提取 ```json ... ``` 代码块
     codeblock = re.search(r"```json(.*?)```", s, re.DOTALL)
     if codeblock:
         s = codeblock.group(1).strip()
@@ -436,66 +501,67 @@ def robust_json_loads(s):
         return json.loads(s)
     except json.decoder.JSONDecodeError as e:
         if "Expecting ',' delimiter" in str(e):
-            # 定义我们关心的字段名（按可能出现的顺序）
-            fields = ["reasoning", "thought", "action", "step", "parameters", "target_element"]
-            field_pattern = '|'.join(re.escape(f) for f in fields)
-            
-            # 模式1：字段值未闭合（缺少 "）
-            # 例如: "reasoning": "内容  "action":
+            fields = [
+                "reasoning",
+                "thought",
+                "action",
+                "step",
+                "parameters",
+                "target_element",
+            ]
+            field_pattern = "|".join(re.escape(f) for f in fields)
 
             str_lit = r'"(?:[^"\\]|\\.)*"'
 
-            # 模式1：字段值未闭合（缺少结尾 "）
-            # 匹配: "field": "内容...（未闭合）  "next_field":
             pattern1 = rf'("({field_pattern})"\s*:\s*"((?:[^"\\]|\\.)*)?)(\s*"({field_pattern})"\s*:)'
-            fixed_s1 = re.sub(pattern1, r'\1",\4', s)  # 补 " 和 ,
+            fixed_s1 = re.sub(pattern1, r'\1",\4', s)
 
-            # 模式2：字段值已闭合，但缺逗号
-            # 匹配: "field": "完整内容"  "next_field":
             pattern2 = rf'("({field_pattern})"\s*:\s*{str_lit})(\s*"({field_pattern})"\s*:)'
-            fixed_s2 = re.sub(pattern2, r'\1,\3', s)   # 只补 ,
-            
-            # 尝试：先用模式1（更严重），再用模式2
+            fixed_s2 = re.sub(pattern2, r"\1,\3", s)
+
             for candidate in [fixed_s1, fixed_s2]:
-                if candidate != s:  # 确实做了修改
+                if candidate != s:
                     try:
                         return json.loads(candidate)
                     except json.JSONDecodeError:
                         continue
 
-            # 如果都不行，再尝试更激进的通用逗号修复（谨慎使用）
-            # 例如：匹配 "xxx"  后跟 "yyy": 且中间无逗号
             generic_pattern = r'("[^"]*?")(\s*"[a-zA-Z_][a-zA-Z0-9_]*"\s*:)'
-            generic_fixed = re.sub(generic_pattern, r'\1,\2', s)
+            generic_fixed = re.sub(generic_pattern, r"\1,\2", s)
             if generic_fixed != s:
                 try:
                     return json.loads(generic_fixed)
                 except:
                     pass
 
-
-        # === 修复 2：多余内容（包括多余 }、文字等）===
         if "Extra data" in str(e):
             try:
                 decoder = json.JSONDecoder()
                 obj, end = decoder.raw_decode(s)
-                logging.warning(f"Extra data detected. Parsed valid JSON up to position {end}.")
+                logging.warning(
+                    f"Extra data detected. Parsed valid JSON up to position {end}."
+                )
                 return obj
             except Exception:
                 pass
-        
-        # 所有修复失败，报错
+
         logging.error(f"解析 decider_response_str 失败: {e}\n原始内容: {s}")
         raise
-    
+
     except Exception as e:
         logging.error(f"解析 decider_response_str 失败: {e}\n原始内容: {s}")
         raise
 
+
 def load_prompt(md_name):
-    """从markdown文件加载应用选择prompt模板"""
+    """从 prompts 目录加载 prompt 模板(支持 phone_runner/prompts 和上级 prompts)"""
     current_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # 优先查找 phone_runner/prompts
     prompt_file = os.path.join(current_dir, "prompts", md_name)
+    if not os.path.exists(prompt_file):
+        # 回退到上级目录 prompts
+        prompt_file = os.path.join(current_dir, "..", "prompts", md_name)
 
     with open(prompt_file, "r", encoding="utf-8") as f:
         content = f.read()
@@ -506,61 +572,48 @@ def load_prompt(md_name):
 import xml.etree.ElementTree as ET
 from collections import Counter
 
+
 def load_and_parse_xml(xml_path):
-    with open(xml_path, 'r', encoding='utf-8') as f:
+    with open(xml_path, "r", encoding="utf-8") as f:
         content = f.read()
-    # 修复可能的 XML 声明缺失
-    if not content.strip().startswith('<'):
-        # 找到第一个 < 开始截取
-        start = content.find('<')
+    if not content.strip().startswith("<"):
+        start = content.find("<")
         if start != -1:
             content = content[start:]
     return ET.fromstring(content)
 
+
 def char_overlap_score(s1, s2):
-    """计算两个字符串的字符交集数量（不考虑顺序，重复字符按最小频次计）"""
     c1, c2 = Counter(s1), Counter(s2)
     intersection = (c1 & c2).elements()
     return sum(1 for _ in intersection)
 
-def is_likely_garbled(text):
-    """
-    判断 text 是否很可能是“乱码”（如图标字体）。
-    规则：
-      - 非空
-      - 所有字符都在 Private Use Area (U+E000–U+F8FF) 或其他非常用区
-      - 且不含中文、英文、数字、常见标点
-    """
-    if not text:
-        return False  # 空不算乱码，只是无文本
 
-    # 常见有效字符的判断（白名单）
+def is_likely_garbled(text):
+    if not text:
+        return False
+
     def is_useful_char(ch):
-        # 中文
-        if '\u4e00' <= ch <= '\u9fff':
+        if "\u4e00" <= ch <= "\u9fff":
             return True
-        # 英文字母
         if ch.isalpha() and ord(ch) < 128:
             return True
-        # 数字
         if ch.isdigit():
             return True
-        # 常见中文标点、英文标点、空格
-        if ch in '，。！？；：""''（）【】《》〈〉、,.!?;:"\'()[]{}<> \t\n':
+        if ch in "，。！？；：""''（）【】《》〈〉、,.!?;:\"'()[]{}<> \t\n":
             return True
-        # 其他常见符号如 @ # $ % & * + - = / 等
-        if ch in '@#$%&*+-=/_':
+        if ch in "@#$%&*+-=/_":
             return True
         return False
 
-    # 如果**至少有一个字符是有意义的**，就认为不是乱码
     if any(is_useful_char(ch) for ch in text):
         return False
-
-    # 否则，很可能是 PUA 图标或无意义字符
     return True
 
+
 flag = False
+
+
 def find_best_match_node(root, target_element):
     global flag
     candidates = []
@@ -568,74 +621,81 @@ def find_best_match_node(root, target_element):
     if not target_clean:
         return None
 
-    # 遍历所有节点
     for node in root.iter():
-
-        text = node.get('text', '').strip()
+        text = node.get("text", "").strip()
         if not text:
-            text = node.get('content-desc', '').strip()
+            text = node.get("content-desc", "").strip()
             if not text:
                 continue
         if is_likely_garbled(text):
-            text = node.get('content-desc', '').strip()
+            text = node.get("content-desc", "").strip()
             if not text:
                 continue
-        
-        text1 = node.get('content-desc', '').strip()
-        id = node.get('resource-id', '').strip()
-        
+
+        text1 = node.get("content-desc", "").strip()
+        id = node.get("resource-id", "").strip()
+
         score = char_overlap_score(target_clean, text)
-        
+
         if score > 1:
-            bounds_str = node.get('bounds', '')
+            bounds_str = node.get("bounds", "")
             if not bounds_str:
                 continue
-            # 解析 bounds: "[x1,y1][x2,y2]" → [x1, y1, x2, y2]
             try:
-                coords = bounds_str.strip('[]').replace('][', ',').split(',')
+                coords = bounds_str.strip("[]").replace("][", ",").split(",")
                 x1, y1, x2, y2 = map(int, coords)
                 if ("搜索栏" in text) and flag == False:
                     flag = True
                     bounds = [x1, y1, x2, y2]
-                    search_bar_node = bounds  # 记录第一个或最后一个均可，通常只有一个
-                    print("11111111111111")
                     return bounds
-                
-                candidates.append({
-                    'text': text,
-                    'content-desc': text1,
-                    'score': score,
-                    'length': len(text),
-                    'bounds': [x1, y1, x2, y2]
-                })
+
+                candidates.append(
+                    {
+                        "text": text,
+                        "content-desc": text1,
+                        "score": score,
+                        "length": len(text),
+                        "bounds": [x1, y1, x2, y2],
+                    }
+                )
             except Exception:
                 continue
         else:
-            bounds_str = node.get('bounds', '')
+            bounds_str = node.get("bounds", "")
             if not bounds_str:
                 continue
-            if ((("搜索栏" in target_clean) or ("搜索框" in target_clean)) and (id == "com.taobao.taobao:id/searchEdit")):
-                print(id)
+            if (
+                ("搜索栏" in target_clean or "搜索框" in target_clean)
+                and (id == "com.taobao.taobao:id/searchEdit")
+            ):
                 flag = True
-                coords = bounds_str.strip('[]').replace('][', ',').split(',')
+                coords = bounds_str.strip("[]").replace("][", ",").split(",")
                 x1, y1, x2, y2 = map(int, coords)
                 bounds = [x1, y1, x2, y2]
-                search_bar_node = bounds  # 记录第一个或最后一个均可，通常只有一个
-                print("222222222222")
                 return bounds
-            
-            
 
     if not candidates:
         return None
 
-    # 排序：先按 score 降序，再按 text 长度升序
-    candidates.sort(key=lambda x: (-x['score'], x['length']))
-    print("candidates")
-    print(candidates)
+    candidates.sort(key=lambda x: (-x["score"], x["length"]))
     flag = False
-    return candidates[0]['bounds']
-def task_in_app(app, old_task, task,  device, data_dir, bbox_flag=True, use_qwen3=True, device_type="Android", use_grounder=True):
+    return candidates[0]["bounds"]
+
+
+# ============================================================================
+# 核心任务执行(保持原有逻辑,仅替换 LLM 调用)
+# ============================================================================
+def task_in_app(
+    app,
+    old_task,
+    task,
+    device,
+    data_dir,
+    bbox_flag=True,
+    use_qwen3=True,
+    device_type="Android",
+    use_grounder=True,
+):
     history = []
     actions = []
     reacts = []
@@ -643,78 +703,96 @@ def task_in_app(app, old_task, task,  device, data_dir, bbox_flag=True, use_qwen
     global use_local_llm_grounder
     global use_local_llm_decider
 
-    # full history for experience record
-    # if experience_rr is not enabled, full_history is the same as history
-    # otherwise, history only contains partial history in current subtask
     full_history = []
 
     if use_qwen3:
         grounder_prompt_template_bbox = load_prompt("grounder_qwen3_bbox.md")
-        grounder_prompt_template_no_bbox = load_prompt("grounder_qwen3_coordinates.md")
-        # decider_prompt_template = load_prompt("decider_qwen3.md")
+        grounder_prompt_template_no_bbox = load_prompt(
+            "grounder_qwen3_coordinates.md"
+        )
         decider_prompt_template = load_prompt("decider_v2.md")
     else:
         grounder_prompt_template_bbox = load_prompt("grounder_bbox.md")
         grounder_prompt_template_no_bbox = load_prompt("grounder_coordinates.md")
         decider_prompt_template = load_prompt("decider_v2.md")
-    
-    # only for experience rr
-    # store original task description since `task` can be modified during execution
+
     orig_task = task
     executing_subtask = False
     replay_idx = 0
-    
+
+    # 重置搜索栏匹配标志(防止跨任务状态泄漏)
+    global flag
+    flag = False
+
     while True:
         if len(actions) >= MAX_STEPS:
             print("Reached maximum steps, stopping the task.")
             break
-        
+
+        # 初始化本步变量(防止未定义)
+        image_index = len(actions) + 1
         replay_this_step = False
         replay_grounder_bbox = None
-        
 
         if len(history) == 0:
             history_str = "(No history)"
         else:
-            history_str = "\n".join(f"{idx}. {h}" for idx, h in enumerate(history, 1))
+            history_str = "\n".join(
+                f"{idx}. {h}" for idx, h in enumerate(history, 1)
+            )
         screenshot_resize = get_screenshot(device, device_type)
 
         if not replay_this_step:
             decider_prompt = decider_prompt_template.format(
-                task=task,
-                history=history_str
+                task=task, history=history_str
             )
             print(f"Decider prompt: \n{decider_prompt}")
 
             decider_start_time = time.time()
 
             if use_local_llm_decider:
-                with tempfile.NamedTemporaryFile(suffix=".png", delete=False, dir=".") as tmp_img:
+                with tempfile.NamedTemporaryFile(
+                    suffix=".png", delete=False, dir="."
+                ) as tmp_img:
                     tmp_img_path = tmp_img.name
-                    src_path = "screenshot-Android.jpg" if device_type == "Android" else "screenshot-Harmony.jpg"
+                    src_path = (
+                        "screenshot-Android.jpg"
+                        if device_type == "Android"
+                        else "screenshot-Harmony.jpg"
+                    )
                     img = Image.open(src_path)
                     img.save(tmp_img_path, "PNG")
                 try:
-                    decider_response_str = local_llm_generate(decider_prompt, tmp_img_path)
+                    decider_response_str = local_llm_generate(
+                        decider_prompt, tmp_img_path
+                    )
                 finally:
                     if os.path.exists(tmp_img_path):
                         os.remove(tmp_img_path)
             else:
                 decider_response_obj = decider_client.chat.completions.create(
                     model=decider_model,
-                    messages=[{
-                        "role": "user",
-                        "content": [
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{screenshot_resize}"}},
-                            {"type": "text", "text": decider_prompt},
-                        ]
-                    }],
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{screenshot_resize}"
+                                    },
+                                },
+                                {"type": "text", "text": decider_prompt},
+                            ],
+                        }
+                    ],
                     temperature=0,
-                    response_format={"type": "json_object", "schema": json_schema}
+                    response_format={
+                        "type": "json_object",
+                        "schema": json_schema,
+                    },
                 )
                 decider_response_str = decider_response_obj.choices[0].message.content
-            
-            
 
             decider_end_time = time.time()
             print(f"Decider time taken: {decider_end_time - decider_start_time} seconds")
@@ -723,18 +801,16 @@ def task_in_app(app, old_task, task,  device, data_dir, bbox_flag=True, use_qwen
         decider_response = robust_json_loads(decider_response_str)
         action = decider_response["action"]
 
-        # ignore `done` action of subtasks in persistant execution logs and full_history
         if not (executing_subtask and action == "done"):
             converted_item = {
                 "reasoning": decider_response["reasoning"],
                 "function": {
                     "name": decider_response["action"],
-                    "parameters": decider_response["parameters"]
-                }
+                    "parameters": decider_response["parameters"],
+                },
             }
             reacts.append(converted_item)
 
-            # compute image index for this loop iteration (1-based)
             image_index = len(actions) + 1
             current_dir = os.getcwd()
             current_image = ""
@@ -749,27 +825,21 @@ def task_in_app(app, old_task, task,  device, data_dir, bbox_flag=True, use_qwen
             img = Image.open(img_path)
             img.save(save_path)
 
-            # attach index to the most recent react (reasoning)
             if reacts:
                 try:
                     reacts[-1]["action_index"] = image_index
                 except Exception:
                     pass
 
-            # 根据设备类型保存hierarchy
             hierarchy = device.dump_hierarchy()
-            # print(hierarchy)
-            
+
             if device_type == "Android":
-                # Android设备保存为XML格式
                 hierarchy_path = os.path.join(data_dir, f"{image_index}.xml")
                 with open(hierarchy_path, "w", encoding="utf-8") as f:
                     f.write(hierarchy)
             else:
-                # Harmony设备保存为JSON格式
                 hierarchy_path = os.path.join(data_dir, f"{image_index}.json")
                 try:
-                    # 尝试将hierarchy解析为JSON（如果已是JSON字符串）
                     if isinstance(hierarchy, str):
                         hierarchy_json = json.loads(hierarchy)
                     else:
@@ -777,36 +847,31 @@ def task_in_app(app, old_task, task,  device, data_dir, bbox_flag=True, use_qwen
                     with open(hierarchy_path, "w", encoding="utf-8") as f:
                         json.dump(hierarchy_json, f, ensure_ascii=False, indent=2)
                 except (json.JSONDecodeError, TypeError):
-                    # 如果解析失败，直接保存为字符串
-                    logging.warning(f"Failed to parse hierarchy as JSON, saving as plain text")
+                    logging.warning("Failed to parse hierarchy as JSON, saving as plain text")
                     with open(hierarchy_path, "w", encoding="utf-8") as f:
                         f.write(str(hierarchy))
             full_history.append(decider_response_str)
 
-
         history.append(decider_response_str)
         if action == "done":
-            
             print("Task completed.")
-            actions.append({
-                "type": "done",
-                "action_index": image_index
-            })
+            actions.append({"type": "done", "action_index": image_index})
             break
         elif action == "click":
             if replay_grounder_bbox is None:
                 reasoning = decider_response["reasoning"]
                 target_element = decider_response["parameters"]["target_element"]
-                grounder_prompt = (grounder_prompt_template_bbox if bbox_flag else grounder_prompt_template_no_bbox).format(reasoning=reasoning, description=target_element)
-                # print(f"Grounder prompt: \n{grounder_prompt}")
-                
-            if bbox_flag:
+                grounder_prompt = (
+                    grounder_prompt_template_bbox
+                    if bbox_flag
+                    else grounder_prompt_template_no_bbox
+                ).format(reasoning=reasoning, description=target_element)
 
+            if bbox_flag:
                 if replay_grounder_bbox is None:
                     reasoning = decider_response["reasoning"]
                     target_element = decider_response["parameters"]["target_element"]
 
-                    # 👇 新逻辑：从 XML 中查找最佳匹配节点
                     xml_path = os.path.join(data_dir, f"{image_index}.xml")
                     try:
                         root = load_and_parse_xml(xml_path)
@@ -814,41 +879,70 @@ def task_in_app(app, old_task, task,  device, data_dir, bbox_flag=True, use_qwen
                         if use_grounder:
                             bbox = None
                         if bbox is None:
-                            print("gggggggggggggggggggggggggggggggggg")
                             grounder_start_time = time.time()
                             if use_local_llm_grounder:
-                                with tempfile.NamedTemporaryFile(suffix=".png", delete=False, dir=".") as tmp_img:
+                                with tempfile.NamedTemporaryFile(
+                                    suffix=".png", delete=False, dir="."
+                                ) as tmp_img:
                                     tmp_grounder_img_path = tmp_img.name
-                                    src_path = "screenshot-Android.jpg" if device_type == "Android" else "screenshot-Harmony.jpg"
+                                    src_path = (
+                                        "screenshot-Android.jpg"
+                                        if device_type == "Android"
+                                        else "screenshot-Harmony.jpg"
+                                    )
                                     img = Image.open(src_path)
                                     img.save(tmp_grounder_img_path, "PNG")
                                 try:
-                                    grounder_response_str = local_llm_generate(grounder_prompt, tmp_grounder_img_path)
+                                    grounder_response_str = local_llm_generate(
+                                        grounder_prompt, tmp_grounder_img_path
+                                    )
                                 finally:
                                     if os.path.exists(tmp_grounder_img_path):
                                         os.remove(tmp_grounder_img_path)
                             else:
                                 grounder_response_obj = grounder_client.chat.completions.create(
                                     model=grounder_model,
-                                    messages=[{
-                                        "role": "user",
-                                        "content": [
-                                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{screenshot_resize}"}},
-                                            {"type": "text", "text": grounder_prompt},
-                                        ]
-                                    }],
+                                    messages=[
+                                        {
+                                            "role": "user",
+                                            "content": [
+                                                {
+                                                    "type": "image_url",
+                                                    "image_url": {
+                                                        "url": f"data:image/jpeg;base64,{screenshot_resize}"
+                                                    },
+                                                },
+                                                {
+                                                    "type": "text",
+                                                    "text": grounder_prompt,
+                                                },
+                                            ],
+                                        }
+                                    ],
                                     temperature=0,
                                 )
-                                grounder_response_str = grounder_response_obj.choices[0].message.content
-
+                                grounder_response_str = (
+                                    grounder_response_obj.choices[0].message.content
+                                )
 
                             grounder_end_time = time.time()
-                            print(f"Grounder time taken: {grounder_end_time - grounder_start_time} seconds")
+                            print(
+                                f"Grounder time taken: {grounder_end_time - grounder_start_time} seconds"
+                            )
                             print(f"Grounder response: \n{grounder_response_str}")
-                            # grounder_response = json.loads(grounder_response_str)
-                            grounder_response = parse_json_response(grounder_response_str)
-                            bbox = grounder_response["bbox"] if "bbox" in grounder_response else None
-                            bbox_2d = grounder_response["bbox_2d"] if "bbox_2d" in grounder_response else None
+                            grounder_response = parse_json_response(
+                                grounder_response_str
+                            )
+                            bbox = (
+                                grounder_response["bbox"]
+                                if "bbox" in grounder_response
+                                else None
+                            )
+                            bbox_2d = (
+                                grounder_response["bbox_2d"]
+                                if "bbox_2d" in grounder_response
+                                else None
+                            )
                             bbox_2d_ = grounder_response.get("bbox-2d", None)
                             bbox_2D = grounder_response.get("bbox_2D", None)
                             if bbox_2D is not None:
@@ -858,19 +952,22 @@ def task_in_app(app, old_task, task,  device, data_dir, bbox_flag=True, use_qwen
                             if bbox_2d is not None:
                                 bbox = bbox_2d
 
-                            # 如果使用 Qwen3 模型，进行坐标转换
                             if use_qwen3:
-                                bbox = convert_qwen3_coordinates_to_absolute(bbox, img.width, img.height, is_bbox=True)
-                                x1, y1, x2, y2 = bbox
+                                bbox = convert_qwen3_coordinates_to_absolute(
+                                    bbox, img.width, img.height, is_bbox=True
+                                )
                             else:
-                                x1, y1, x2, y2 = [int(coord/factor) for coord in bbox]
-                            # raise ValueError("No matching text node found in XML for target_element")
+                                bbox = [
+                                    int(coord / factor) for coord in bbox
+                                ]
                         x1, y1, x2, y2 = bbox
-                        print(f"Matched UI element via XML: text='{target_element}' → bounds={bbox}")
+                        print(
+                            f"Matched UI element via XML: text='{target_element}' → bounds={bbox}"
+                        )
                     except Exception as e:
-                        print(f"Failed to find element via XML, falling back to grounder (if needed): {e}")
-                        # 可选：保留原 grounder 作为 fallback，或直接报错
-                        # 这里我们按你的要求完全替换，所以不 fallback
+                        print(
+                            f"Failed to find element via XML, falling back to grounder (if needed): {e}"
+                        )
                         raise e
                 else:
                     print(f"Using replayed grounder bbox: {replay_grounder_bbox}")
@@ -882,134 +979,173 @@ def task_in_app(app, old_task, task,  device, data_dir, bbox_flag=True, use_qwen
                 position_x = (x1 + x2) // 2
                 position_y = (y1 + y2) // 2
                 device.click(position_x, position_y)
-                # save action (record index only)
-                actions.append({
-                    "type": "click",
-                    "position_x": position_x,
-                    "position_y": position_y,
-                    "bounds": [x1, y1, x2, y2],
-                    "action_index": image_index
-                })
+                actions.append(
+                    {
+                        "type": "click",
+                        "position_x": position_x,
+                        "position_y": position_y,
+                        "bounds": [x1, y1, x2, y2],
+                        "action_index": image_index,
+                    }
+                )
 
                 current_dir = os.getcwd()
                 img_path = os.path.join(current_dir, current_image)
                 save_path = os.path.join(data_dir, f"{image_index}_highlighted.jpg")
                 img = Image.open(img_path)
                 draw = ImageDraw.Draw(img)
-                # font = ImageFont.truetype("msyh.ttf", 40)
                 text = f"CLICK [{position_x}, {position_y}]"
                 text = textwrap.fill(text, width=20)
                 text_width, text_height = draw.textbbox((0, 0), text)[2:]
-                draw.text((img.width / 2 - text_width / 2, 0), text, fill="red")
+                draw.text(
+                    (img.width / 2 - text_width / 2, 0), text, fill="red"
+                )
                 img.save(save_path)
 
-                # 拉框
                 bounds_path = os.path.join(data_dir, f"{image_index}_bounds.jpg")
                 img_bounds = Image.open(save_path)
                 draw_bounds = ImageDraw.Draw(img_bounds)
-                draw_bounds.rectangle([x1, y1, x2, y2], outline='red', width=5)
+                draw_bounds.rectangle([x1, y1, x2, y2], outline="red", width=5)
                 img_bounds.save(bounds_path)
 
-                # # 画点
-                # cv2image = cv2.imread(bounds_path)
-                # if cv2image is not None:
-                #     # 在点击位置画圆点
-                #     cv2.circle(cv2image, (position_x, position_y), 15, (0, 255, 0), -1)  # 绿色实心圆
-                #     # 保存带点击点的图像
-                #     click_point_path = os.path.join(data_dir, f"{image_index}_click_point.jpg")
-                #     cv2.imwrite(click_point_path, cv2image)
-
-                # 3. 用 PIL 画绿色实心圆（替代 cv2.circle）
-                click_point_path = os.path.join(data_dir, f"{image_index}_click_point.jpg")
-                img_click = Image.open(bounds_path)  # 从 bounds 图开始
+                click_point_path = os.path.join(
+                    data_dir, f"{image_index}_click_point.jpg"
+                )
+                img_click = Image.open(bounds_path)
                 draw_click = ImageDraw.Draw(img_click)
-
-                # 定义圆的外接矩形：(x - r, y - r, x + r, y + r)
                 radius = 15
                 draw_click.ellipse(
-                    [position_x - radius, position_y - radius, position_x + radius, position_y + radius],
-                    fill=(0, 255, 0),      # 绿色 (R, G, B)
-                    outline=None
+                    [
+                        position_x - radius,
+                        position_y - radius,
+                        position_x + radius,
+                        position_y + radius,
+                    ],
+                    fill=(0, 255, 0),
+                    outline=None,
                 )
                 img_click.save(click_point_path)
 
             else:
+                # bbox_flag=False: 直接用 grounder 获取坐标
+                grounder_start_time = time.time()
+                if use_local_llm_grounder:
+                    with tempfile.NamedTemporaryFile(
+                        suffix=".png", delete=False, dir="."
+                    ) as tmp_img:
+                        tmp_grounder_img_path = tmp_img.name
+                        src_path = (
+                            "screenshot-Android.jpg"
+                            if device_type == "Android"
+                            else "screenshot-Harmony.jpg"
+                        )
+                        img = Image.open(src_path)
+                        img.save(tmp_grounder_img_path, "PNG")
+                    try:
+                        grounder_response_str = local_llm_generate(
+                            grounder_prompt, tmp_grounder_img_path
+                        )
+                    finally:
+                        if os.path.exists(tmp_grounder_img_path):
+                            os.remove(tmp_grounder_img_path)
+                else:
+                    grounder_response_obj = grounder_client.chat.completions.create(
+                        model=grounder_model,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": f"data:image/jpeg;base64,{screenshot_resize}"
+                                        },
+                                    },
+                                    {
+                                        "type": "text",
+                                        "text": grounder_prompt,
+                                    },
+                                ],
+                            }
+                        ],
+                        temperature=0,
+                    )
+                    grounder_response_str = (
+                        grounder_response_obj.choices[0].message.content
+                    )
+
+                grounder_end_time = time.time()
+                print(
+                    f"Grounder time taken: {grounder_end_time - grounder_start_time} seconds"
+                )
+                print(f"Grounder response: \n{grounder_response_str}")
+                grounder_response = parse_json_response(
+                    grounder_response_str
+                )
+
                 coordinates = grounder_response["coordinates"]
                 if use_qwen3:
-                    coordinates = convert_qwen3_coordinates_to_absolute(coordinates, img.width, img.height, is_bbox=False)
+                    coordinates = convert_qwen3_coordinates_to_absolute(
+                        coordinates, img.width, img.height, is_bbox=False
+                    )
                     x, y = coordinates
                 else:
                     x, y = [int(coord / factor) for coord in coordinates]
                 device.click(x, y)
-                actions.append({
-                    "type": "click",
-                    "position_x": x,
-                    "position_y": y,
-                    "action_index": image_index
-                })          
+                actions.append(
+                    {
+                        "type": "click",
+                        "position_x": x,
+                        "position_y": y,
+                        "action_index": image_index,
+                    }
+                )
         elif action == "input":
             text = decider_response["parameters"]["text"]
             device.input(text)
-            actions.append({
-                "type": "input",
-                "text": text,
-                "action_index": image_index
-            })
+            actions.append(
+                {"type": "input", "text": text, "action_index": image_index}
+            )
 
         elif action == "swipe":
             direction = decider_response["parameters"]["direction"]
 
-            if direction not in ["UP", "DOWN", "LEFT", "RIGHT"]:
+            # 统一转大写校验,兼容 LLM 返回小写/混合大小写
+            direction_upper = direction.upper()
+            if direction_upper not in ["UP", "DOWN", "LEFT", "RIGHT"]:
                 raise ValueError(f"Invalid swipe direction: {direction}")
-            
-            device.swipe(direction.lower(), 0.6)
-            actions.append({
-                "type": "swipe",
-                "press_position_x": None,
-                "press_position_y": None,
-                "release_position_x": None,
-                "release_position_y": None,
-                "direction": direction.lower(),
-                "action_index": image_index
-            })
-            
-            # 为滑动创建可视化
-            create_swipe_visualization(data_dir, image_index, direction.lower())
+
+            device.swipe(direction_upper.lower(), 0.6)
+            actions.append(
+                {
+                    "type": "swipe",
+                    "press_position_x": None,
+                    "press_position_y": None,
+                    "release_position_x": None,
+                    "release_position_y": None,
+                    "direction": direction_upper.lower(),
+                    "action_index": image_index,
+                }
+            )
+
+            create_swipe_visualization(data_dir, image_index, direction_upper.lower())
         elif action == "wait":
             print("Waiting for a while...")
-            actions.append({
-                "type": "wait",
-                "action_index": image_index
-            })
+            time.sleep(3)
+            actions.append({"type": "wait", "action_index": image_index})
+        elif action in ("stop", "terminate"):
+            print(f"Task {action} requested by LLM, stopping.")
+            actions.append({"type": action, "action_index": image_index})
+            break
         else:
             raise ValueError(f"Unknown action: {action}")
-        
+
         time.sleep(1)
-        
-    # always restore task description
+
     task = orig_task
-    
-    # data = {
-    #     "app_name": app,
-    #     "task_type": None,
-    #     "old_task_description": old_task,
-    #     "task_description": task,
-    #     "action_count": len(actions),
-    #     "actions": actions
-    # }
-
-    # with open(os.path.join(data_dir, "actions.json"), "w", encoding='utf-8') as f:
-    #     json.dump(data, f, ensure_ascii=False, indent=4)
-    # with open(os.path.join(data_dir, "react.json"), "w", encoding='utf-8') as f:
-    #     json.dump(reacts, f, ensure_ascii=False, indent=4)
-    
-
-
 
 
 def parse_planner_response(response_str: str):
-
-    # 尝试匹配 ```json ... ``` 代码块
     pattern = re.compile(r"```json\s*(.*?)\s*```", re.DOTALL)
     match = pattern.search(response_str)
 
@@ -1017,7 +1153,6 @@ def parse_planner_response(response_str: str):
     if match:
         json_str = match.group(1)
     else:
-        # 如果没有代码块，直接当成 JSON
         json_str = response_str.strip()
 
     try:
@@ -1027,9 +1162,11 @@ def parse_planner_response(response_str: str):
         logging.error(f"解析 JSON 失败: {e}\n内容为:\n{json_str}")
         return None
 
-def get_app_package_name(task_description, use_graphrag=False, device_type="Android",  use_local=False):
-    """单阶段：本地检索经验，调用模型完成应用选择和任务描述生成。"""
-    current_file_path = Path(__file__).resolve()
+
+def get_app_package_name(
+    task_description, use_graphrag=False, device_type="Android", use_local=False
+):
+    """单阶段:本地检索经验,调用模型完成应用选择和任务描述生成。"""
 
     planner_prompt_template = '''
     ## 角色定义
@@ -1078,13 +1215,13 @@ def get_app_package_name(task_description, use_graphrag=False, device_type="Andr
 - 浏览器: com.microsoft.emmx
 
 ## 任务要求
-1.  **选择应用**：根据用户任务描述，从“可用应用列表”中选择最合适的应用。
-2.  **生成最终任务描述**：参考最合适的“相关的经验/模板”，将用户的原始任务描述转化为一个详细、完整、结构化的任务描述。
+1.  **选择应用**：根据用户任务描述，从"可用应用列表"中选择最合适的应用。
+2.  **生成最终任务描述**：参考最合适的"相关的经验/模板"，将用户的原始任务描述转化为一个详细、完整、结构化的任务描述。
     - **语义保持一致**：最终描述必须与用户原始意图完全相同。
     - **填充与裁剪**：
         - 如果经验/模板和原始用户任务描述不相关，根据任务对应APP的真实使用方式**简要**完善任务详细步骤
         - 仅填充模板中与用户需求直接相关的步骤,保留原始用户任务描述。
-        - 处理“可选”步骤：仅当原始任务描述中显式要求时才填充 “可选”步骤且去除“可选：”标识，原始任务未显示要求则移除对应步骤。
+        - 处理"可选"步骤：仅当原始任务描述中显式要求时才填充 "可选"步骤且去除"可选："标识，原始任务未显示要求则移除对应步骤。
         - 模板里未被原始任务隐含或显式提及的步骤不能增加，多余步骤移除。
         - 若模板中的占位符（如 `{{城市/类型}}`）在用户描述中未提供具体信息，则移除。
     - **自然表达**：输出的描述应符合中文自然语言习惯，避免冗余。
@@ -1100,17 +1237,12 @@ def get_app_package_name(task_description, use_graphrag=False, device_type="Andr
 }}
 ```
 '''
-    
-    
 
-    # 构建Prompt
     prompt = planner_prompt_template.format(
-        task_description=task_description,
-        experience_content= "" # enhanced_context 现在暂时没用经验检索
+        task_description=task_description, experience_content=""
     )
 
     if use_local:
-        # 本地 LLM 不需要图片，纯文本
         response_str = local_llm_generate(prompt)
     else:
         response_str = planner_client.chat.completions.create(
@@ -1126,149 +1258,206 @@ def get_app_package_name(task_description, use_graphrag=False, device_type="Andr
     app_name = response_json.get("app_name")
     package_name = response_json.get("package_name")
     final_desc = response_json.get("final_task_description", task_description)
-    return app_name, package_name, final_desc #, experience_content
+    return app_name, package_name, final_desc
 
-# for testing purposes
+
+# ============================================================================
+# 主入口
+# ============================================================================
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="MobiAgent Phone Runner")
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="auto",
+        help="模型名称 (auto/minicpm-v-4.6/qwen3.5-2b/qwen3.5-4b/gemma4-e2b/gui-owl-1.5-8b)",
+    )
+    parser.add_argument(
+        "--model-path", type=str, default=None, help="直接指定 GGUF 模型文件路径"
+    )
+    parser.add_argument(
+        "--mmproj-path", type=str, default=None, help="视觉模型 mmproj 文件路径"
+    )
+    parser.add_argument("--port", type=int, default=None, help="llama-server 端口")
+    parser.add_argument(
+        "--ctx-size", type=int, default=None, help="上下文长度 (默认 4096)"
+    )
+    parser.add_argument(
+        "--list-models", action="store_true", help="列出所有可用模型并退出"
+    )
 
-    # 解析命令行参数
-    parser = argparse.ArgumentParser(description="MobiMind Agent")
-    parser.add_argument("--service_ip", type=str, default="localhost", help="Ip for the services (default: localhost)")
-    parser.add_argument("--decider_port", type=int, default=8000, help="Port for decider service (default: 8000)")
-    parser.add_argument("--grounder_port", type=int, default=8001, help="Port for grounder service (default: 8001)")
-    parser.add_argument("--planner_port", type=int, default=8002, help="Port for planner service (default: 8002)")
-    parser.add_argument("--user_profile", choices=["on", "off"], default="off", help="Enable user profile memory (on/off). Default: off")
-    parser.add_argument("--use_graphrag", choices=["on", "off"], default="off", help="Use GraphRAG for user profile preference memory (on/off). Default: off")
-    parser.add_argument("--clear_memory", action="store_true", help="Force clear all stored user memories and exit")
-    parser.add_argument("--device", type=str, default="Android", choices=["Android", "Harmony"], help="Device type: Android or Harmony (default: Android)")
-    parser.add_argument("--device_endpoint", type=str, default=None, help="Device endpoint for connecting with adb/hdc (default: None)")
-    parser.add_argument("--use_qwen3", action="store_true", default=True, help="Whether to use Qwen3 model (default: False)")
-    parser.add_argument("--use_experience", action="store_true", default=False, help="Whether to use experience (use planner for task rewriting) (default: False)")
-    parser.add_argument("--use_experience_rr", action="store_true", default=False, help="Whether to use experience-based record & replay (default: False)")
-    parser.add_argument("--data_dir", type=str, default=None, help="Directory to save data (default: ./data relative to script location)")
-    parser.add_argument("--task_file", type=str, default=None, help="Path to task.json file (default: ./task.json relative to script location)")
-    parser.add_argument("--local_planner", action="store_true", help="Use local LLM via local_llm_generate instead of OpenAI clients")
-    parser.add_argument("--local_grounder", action="store_true", help="Use local LLM via local_llm_generate instead of OpenAI clients")
-    parser.add_argument("--local_decider", action="store_true", help="Use local LLM via local_llm_generate instead of OpenAI clients")
-    parser.add_argument("--use_grounder", action="store_true", default=True, 
-                    help="Whether to use grounder model for localization (default: True). "
-                         "If disabled, prefer XML node matching and skip grounder when match succeeds.")
-    
-    #parser.add_argument("--invalidate_singletask_storage", action="store_true", help="Delete utils/experience/singletask_storage before starting tasks")
+    # 原有参数(保留兼容)
+    parser.add_argument(
+        "--service_ip",
+        type=str,
+        default="localhost",
+        help="云端服务 IP (本地模式忽略)",
+    )
+    parser.add_argument("--decider_port", type=int, default=8000)
+    parser.add_argument("--grounder_port", type=int, default=8001)
+    parser.add_argument("--planner_port", type=int, default=8002)
+    parser.add_argument("--user_profile", choices=["on", "off"], default="off")
+    parser.add_argument("--use_graphrag", choices=["on", "off"], default="off")
+    parser.add_argument("--clear_memory", action="store_true")
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="Android",
+        choices=["Android", "Harmony"],
+    )
+    parser.add_argument("--device_endpoint", type=str, default=None)
+    parser.add_argument("--use_qwen3", action="store_true", default=True)
+    parser.add_argument("--use_experience", action="store_true", default=False)
+    parser.add_argument("--use_experience_rr", action="store_true", default=False)
+    parser.add_argument("--data_dir", type=str, default=None)
+    parser.add_argument("--task_file", type=str, default=None)
+    parser.add_argument("--local_planner", action="store_true")
+    parser.add_argument("--local_grounder", action="store_true")
+    parser.add_argument("--local_decider", action="store_true")
+    parser.add_argument("--use_grounder", action="store_true", default=True)
+
     args = parser.parse_args()
 
+    # 列出模型
+    if args.list_models:
+        list_models()
+        sys.exit(0)
+
+    # 本地模式:指定了模型(auto 或具体名称)就启用所有 local 组件
+    if args.model != "cloud":
+        args.local_planner = True
+        args.local_decider = True
+        args.local_grounder = True
+
+    # 初始化本地 LLM(如果使用本地模式)
+    use_local = args.local_planner or args.local_grounder or args.local_decider
+    if use_local:
+        print("\n=== 初始化本地 LLM 后端 ===")
+        init_local_llm(
+            model_name=args.model,
+            model_path=args.model_path,
+            mmproj_path=args.mmproj_path,
+            port=args.port,
+            ctx_size=args.ctx_size,
+        )
+
     use_experience_rr = args.use_experience_rr
-    if use_experience_rr and (not args.use_experience):
-        logging.warning("use_experience_rr is enabled but use_experience is disabled; disabling use_experience_rr.")
+    if use_experience_rr and not args.use_experience:
+        logging.warning(
+            "use_experience_rr is enabled but use_experience is disabled; disabling use_experience_rr."
+        )
         use_experience_rr = False
 
-    # 使用命令行参数初始化
-    enable_user_profile = (args.user_profile == "on")
-    use_graphrag = (args.use_graphrag == "on")
+    enable_user_profile = args.user_profile == "on"
+    use_graphrag = args.use_graphrag == "on"
+
     init(
-        args.service_ip, 
-        args.decider_port, 
-        args.grounder_port, 
+        args.service_ip,
+        args.decider_port,
+        args.grounder_port,
         args.planner_port,
-        enable_user_profile=enable_user_profile, 
-        use_graphrag=use_graphrag, 
+        enable_user_profile=enable_user_profile,
+        use_graphrag=use_graphrag,
         use_experience_rr=use_experience_rr,
         use_local_planner=args.local_planner,
         use_local_grounder=args.local_grounder,
         use_local_decider=args.local_decider,
     )
 
-   
     device = AndroidDevice(args.device_endpoint)
 
-         
     print(f"Connected to device: {args.device}")
     use_qwen3_model = args.use_qwen3
     use_experience = args.use_experience
-    current_device_type = args.device  # 保存设备类型用于后续使用
+    current_device_type = args.device
     print(f"Use Qwen3 model: {use_qwen3_model}")
     print(f"Use experience (planner task rewriting): {use_experience}")
     print(f"Device type: {current_device_type}")
-    # 配置数据保存目录
+
     if args.data_dir:
         data_base_dir = args.data_dir
         print(f"Using custom data directory: {data_base_dir}")
     else:
-        data_base_dir = os.path.join(os.path.dirname(__file__), 'data')
+        data_base_dir = os.path.join(os.path.dirname(__file__), "data")
         print(f"Using default data directory: {data_base_dir}")
-    
+
     if not os.path.exists(data_base_dir):
         os.makedirs(data_base_dir)
         print(f"Created data directory: {data_base_dir}")
 
-    # 读取任务列表
     if args.task_file:
         task_json_path = args.task_file
         print(f"Using custom task file: {task_json_path}")
     else:
         task_json_path = os.path.join(os.path.dirname(__file__), "task.json")
-    # with open(task_json_path, "r", encoding="utf-8") as f:
-    #     task_list = json.load(f)
-    task_list = [
-    "去淘宝买荣耀手机",
-    "去淘宝买草莓",
-    "去淘宝买香蕉",
-    "去淘宝买草莓",
-    "去淘宝买一箱橙汁",    
-    "去淘宝买张小泉剪刀",
-    "去淘宝买雨伞",
-    "去淘宝买围巾",
-    "去淘宝买手套",
-    "去淘宝买苹果17promax,颜色要白色,内存512G"
-    "去淘宝买华为mate80手机",
-    "去淘宝买剪刀",
-    "去淘宝买雨伞",
-    "去淘宝买荣耀手机",
-    "去淘宝买华为mate80手机",
-    "去淘宝买荣耀手机",
-    "去淘宝买苹果17promax,颜色要白色,内存512G"
-    "去淘宝买荣耀手机",
-    "用携程帮我查询北京的汉庭酒店价格",
-    "帮我用携程查询上海的汉庭酒店价格",
 
-]
-    
-    # print(task_list)
-    print("dddd") 
-    for task in task_list:
-        existing_dirs = [d for d in os.listdir(data_base_dir) if os.path.isdir(os.path.join(data_base_dir, d)) and d.isdigit()]
-        if existing_dirs:
-            data_index = max(int(d) for d in existing_dirs) + 1
-        else:
-            data_index = 1
-        data_dir = os.path.join(data_base_dir, str(data_index))
-        os.makedirs(data_dir)
+    # 加载任务列表
+    if os.path.exists(task_json_path):
+        try:
+            with open(task_json_path, "r", encoding="utf-8") as f:
+                task_data = json.load(f)
+            if isinstance(task_data, list):
+                task_list = task_data
+            elif isinstance(task_data, dict) and "tasks" in task_data:
+                task_list = task_data["tasks"]
+            else:
+                task_list = [str(task_data)]
+            print(f"从 {task_json_path} 加载了 {len(task_list)} 个任务")
+        except (json.JSONDecodeError, OSError) as e:
+            logging.warning(f"读取 task.json 失败: {e}, 使用默认任务")
+            task_list = ["去淘宝买草莓"]
+    else:
+        print(f"task.json 不存在,使用默认任务")
+        task_list = ["去淘宝买草莓"]
 
-        task_description = task
-        
-        # 调用 planner 获取应用名称和包名
-        print(f"Calling planner to get app_name and package_name")
-        # app_name, package_name, planner_task_description, template = get_app_package_name(task_description, use_graphrag=use_graphrag, device_type=current_device_type)
-        app_name, package_name, planner_task_description = get_app_package_name(task_description, use_graphrag=use_graphrag, device_type=current_device_type, use_local=args.local_planner)
-        print(f"Planner result - App: {app_name}, Package: {package_name}")
+    # 主循环(用 try/finally 确保 llama-server 被关闭)
+    try:
+        for task in task_list:
+            existing_dirs = [
+                d
+                for d in os.listdir(data_base_dir)
+                if os.path.isdir(os.path.join(data_base_dir, d)) and d.isdigit()
+            ]
+            if existing_dirs:
+                data_index = max(int(d) for d in existing_dirs) + 1
+            else:
+                data_index = 1
+            data_dir = os.path.join(data_base_dir, str(data_index))
+            os.makedirs(data_dir)
 
-        # 根据 use_experience 参数决定是否使用 planner 改写的任务描述
-        if use_experience == True:
-            print(f"Using experience: using planner-rewritten task description")
-            new_task_description = planner_task_description
-            print(f"New task description: {new_task_description}")
-        else:
-            print(f"Not using experience: using original task description")
-            new_task_description = task_description
-            
-        print(f"Starting task in app: {app_name} (package: {package_name})")
-        device.app_start(package_name)
-        task_in_app(app_name, task_description, new_task_description, device, data_dir, True, use_qwen3_model, current_device_type, args.use_grounder)
-        print(f"Stopping app: {app_name} (package: {package_name})")
-        # device.app_stop(package_name)
-        
-    # 等待所有偏好提取任务完成
-    # if preference_extractor and hasattr(preference_extractor, 'executor'):
-    #     print("Waiting for all preference extraction tasks to complete...")
-    #     preference_extractor.executor.shutdown(wait=True)
-    #     print("All preference extraction tasks completed")
+            task_description = task
+
+            print(f"Calling planner to get app_name and package_name")
+            app_name, package_name, planner_task_description = get_app_package_name(
+                task_description,
+                use_graphrag=use_graphrag,
+                device_type=current_device_type,
+                use_local=args.local_planner,
+            )
+            print(f"Planner result - App: {app_name}, Package: {package_name}")
+
+            if use_experience == True:
+                print(f"Using experience: using planner-rewritten task description")
+                new_task_description = planner_task_description
+                print(f"New task description: {new_task_description}")
+            else:
+                print(f"Not using experience: using original task description")
+                new_task_description = task_description
+
+            print(f"Starting task in app: {app_name} (package: {package_name})")
+            device.app_start(package_name)
+            task_in_app(
+                app_name,
+                task_description,
+                new_task_description,
+                device,
+                data_dir,
+                True,
+                use_qwen3_model,
+                current_device_type,
+                args.use_grounder,
+            )
+            print(f"Stopping app: {app_name} (package: {package_name})")
+    finally:
+        # 确保本地 LLM 服务被关闭(防止进程泄漏)
+        shutdown_local_llm()
