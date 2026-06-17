@@ -12,13 +12,11 @@ weights/
 
 utils/experience/BAAI/
 .venv/
-utils/experience/BAAI/
 utils/experience/all-MiniLM-L6-v2/
 data-*
 new_data/
 vectordb/
 RAG/
-utils/experience/BAAI/
 
 output*/
 utils/experience/multistage_plans_storage
