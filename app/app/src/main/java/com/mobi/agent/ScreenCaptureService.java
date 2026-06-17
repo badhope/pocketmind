@@ -326,12 +326,13 @@ public class ScreenCaptureService extends Service {
             }
             
             File screenshotFile = new File(screenshotsDir, fileName);
-            
-            FileOutputStream fos = new FileOutputStream(screenshotFile);
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
-            fos.flush();
-            fos.close();
-            
+
+            // 使用 try-with-resources 确保 FileOutputStream 正确关闭,防止资源泄漏
+            try (FileOutputStream fos = new FileOutputStream(screenshotFile)) {
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
+                fos.flush();
+            }
+
             String filePath = screenshotFile.getAbsolutePath();
             Log.d(TAG, "截图已保存: " + filePath);
             

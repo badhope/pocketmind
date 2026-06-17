@@ -1,16 +1,16 @@
 package com.mobi.agent;
 
 public class Message {
-    public static String SENT_BY_ME = "me";
-    public static String SENT_BY_BOT = "bot";
+    public static final String SENT_BY_ME = "me";
+    public static final String SENT_BY_BOT = "bot";
 
-    String message;
-    String sentBy;
-    
-    // 新增字段：用于结构化展示
-    String reasoning;      // AI思维链
-    String action;         // 执行动作
-    String parameters;     // 动作参数
+    private String message;
+    private String sentBy;
+
+    // 新增字段:用于结构化展示
+    private String reasoning;      // AI思维链
+    private String action;         // 执行动作
+    private String parameters;     // 动作参数
 
     public String getMessage() {
         return message;

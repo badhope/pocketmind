@@ -126,7 +126,9 @@ class UniversalTestRunner:
         model = getattr(llmconfig, 'MODEL', None)
         
         print("=== LLM 配置 ===")
-        print(f"API_KEY: {api_key}")
+        # 脱敏输出 API Key,只显示前 4 位和后 4 位
+        masked_key = f"{api_key[:4]}...{api_key[-4:]}" if api_key and len(api_key) > 8 else "(未设置或过短)"
+        print(f"API_KEY: {masked_key}")
         print(f"BASE_URL: {base_url}")
         print(f"MODEL: {model}")
         

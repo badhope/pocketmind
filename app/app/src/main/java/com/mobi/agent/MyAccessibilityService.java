@@ -1961,9 +1961,9 @@ public class MyAccessibilityService extends AccessibilityService {
             // 先尝试给元素设置焦点
             android.util.Log.e("AICHATBOT_SERVICE", "尝试激活元素...");
             node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-            try { Thread.sleep(300); } catch (InterruptedException e) {}
+            try { Thread.sleep(300); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
             node.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
-            try { Thread.sleep(300); } catch (InterruptedException e) {}
+            try { Thread.sleep(300); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
             
             // 然后输入文本
             boolean result = performAdvancedTextInput(node, text);

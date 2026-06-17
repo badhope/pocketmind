@@ -235,10 +235,12 @@ download_model() {
         info "  如果下载慢,可手动用 hf-mirror.com"
 
         # 先尝试官方源,失败则用镜像
-        if wget -c -q --show-progress "$MODEL_URL" -O "$MODEL_PATH" 2>/dev/null; then
+        # 失败后删除残留部分文件,防止断点续传基于损坏文件
+        if wget -c --show-progress "$MODEL_URL" -O "$MODEL_PATH"; then
             info "从 HuggingFace 下载完成 ✅"
         else
-            warn "官方源下载失败,尝试镜像源..."
+            warn "官方源下载失败,清理残留并尝试镜像源..."
+            rm -f "$MODEL_PATH"
             wget -c --show-progress "$MODEL_URL_MIRROR" -O "$MODEL_PATH"
             info "从镜像源下载完成 ✅"
         fi
@@ -291,6 +293,15 @@ verify_install() {
         exit 1
     fi
     info "模型文件 ✅"
+
+    # 检查 mmproj 文件(视觉模型需要)
+    if [ -n "$MMPROJ_FILE" ] && [ ! -f "${MODEL_DIR}/${MMPROJ_FILE}" ]; then
+        error "mmproj 文件缺失: ${MODEL_DIR}/${MMPROJ_FILE}"
+        exit 1
+    fi
+    if [ -n "$MMPROJ_FILE" ]; then
+        info "mmproj 文件 ✅"
+    fi
 
     info "\n安装验证通过! 🎉"
 }

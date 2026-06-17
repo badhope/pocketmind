@@ -9,7 +9,6 @@ import json
 import re
 import logging
 import sys
-import json
 from datetime import datetime
 from openai import OpenAI
 import argparse

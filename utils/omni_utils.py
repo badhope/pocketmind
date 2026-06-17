@@ -75,7 +75,7 @@ def get_parsed_content_icon(filtered_boxes, starting_idx, image_source, caption_
             cropped_image = image_source[ymin:ymax, xmin:xmax, :]
             cropped_image = cv2.resize(cropped_image, (64, 64))
             croped_pil_image.append(to_pil(cropped_image))
-        except:
+        except Exception:
             continue
 
     model, processor = caption_model_processor['model'], caption_model_processor['processor']
@@ -275,7 +275,7 @@ def remove_overlap_new(boxes, iou_threshold, ocr_bbox=None):
                                 # gather all ocr labels
                                 ocr_labels += box3_elem['content'] + ' '
                                 filtered_boxes.remove(box3_elem)
-                            except:
+                            except Exception:
                                 continue
                             # break
                         elif is_inside(box1, box3): # icon inside ocr, don't added this icon box, no need to check other ocr bbox bc no overlap between ocr bbox, icon can only be in one ocr box
@@ -412,10 +412,9 @@ def get_som_labeled_img(image_source: Union[str, Image.Image], model=None, BOX_T
         ocr_bbox = torch.tensor(ocr_bbox) / torch.Tensor([w, h, w, h])
         ocr_bbox=ocr_bbox.tolist()
     else:
-        print('no ocr bbox!!!')
-        ocr_bbox = None
+        ocr_bbox = []
 
-    ocr_bbox_elem = [{'type': 'text', 'bbox':box, 'interactivity':False, 'content':txt, 'source': 'box_ocr_content_ocr'} for box, txt in zip(ocr_bbox, ocr_text) if int_box_area(box, w, h) > 0] 
+    ocr_bbox_elem = [{'type': 'text', 'bbox':box, 'interactivity':False, 'content':txt, 'source': 'box_ocr_content_ocr'} for box, txt in zip(ocr_bbox, ocr_text) if int_box_area(box, w, h) > 0]
     xyxy_elem = [{'type': 'icon', 'bbox':box, 'interactivity':True, 'content':None} for box in xyxy.tolist() if int_box_area(box, w, h) > 0]
     filtered_boxes = remove_overlap_new(boxes=xyxy_elem, iou_threshold=iou_threshold, ocr_bbox=ocr_bbox_elem)
     

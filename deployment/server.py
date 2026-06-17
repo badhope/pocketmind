@@ -329,10 +329,13 @@ async def v1(request_body: RequestBody):
         decider_prompt = DECIDER_PROMPT.format(task=rewritten_task, history=history_str, task_repeat=rewritten_task)
         decider_output = get_model_output(decider_client, decider_prompt, img_b64)
         print(decider_output)
-        decider_output_json = json.loads(decider_output)
+        try:
+            decider_output_json = json.loads(decider_output)
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=500, detail=f"Decider 返回非合法 JSON: {e}\n原始输出: {decider_output[:500]}")
         reasoning = decider_output_json["reasoning"]
         if should_terminate(reasoning):
-            # await 
+            # await
             cleanup_task(task)
             return ResponseBody(
                 reasoning=reasoning,
@@ -348,10 +351,15 @@ async def v1(request_body: RequestBody):
             print(grounder_output)
             if grounder_output.startswith("```json"):
                 grounder_output = grounder_output.replace("```json", "").replace("```", "")
-            grounder_output_json = json.loads(grounder_output)
+            try:
+                grounder_output_json = json.loads(grounder_output)
+            except json.JSONDecodeError as e:
+                raise HTTPException(status_code=500, detail=f"Grounder 返回非合法 JSON: {e}\n原始输出: {grounder_output[:500]}")
             if isinstance(grounder_output_json, list):
                 grounder_output_json = grounder_output_json[0]
             bbox = grounder_output_json.get("bbox", grounder_output_json.get("bbox_2d", None))
+            if bbox is None:
+                raise HTTPException(status_code=500, detail=f"Grounder 未返回 bbox 字段,原始输出: {grounder_output[:500]}")
             if use_qwen3:
                 bbox[0] = bbox[0] / 1000 * width
                 bbox[2] = bbox[2] / 1000 * width

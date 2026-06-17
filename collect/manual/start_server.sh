@@ -1,6 +1,7 @@
 #!/bin/bash
 # 启动Manual数据收集工具服务器脚本
 # 使用方法: ./start_server.sh
+set -euo pipefail
 
 # 获取脚本所在目录
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"

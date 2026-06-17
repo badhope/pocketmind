@@ -517,7 +517,7 @@ def robust_json_loads(s):
             if generic_fixed != s:
                 try:
                     return json.loads(generic_fixed)
-                except:
+                except Exception:
                     pass
 
         if "Extra data" in str(e):
@@ -861,6 +861,8 @@ def task_in_app(
                     bbox = None if use_grounder else find_best_match_node(
                         root, target_element
                     )
+                    # 标记 bbox 来源:XML 匹配返回绝对像素坐标,grounder 返回归一化坐标
+                    bbox_from_xml = bbox is not None
                     if bbox is None:
                         grounder_start_time = time.time()
                         if use_local_llm_grounder:
@@ -1446,6 +1448,7 @@ if __name__ == "__main__":
                 args.use_grounder,
             )
             print(f"Stopping app: {app_name} (package: {package_name})")
+            device.app_stop(package_name)
     finally:
         # 确保本地 LLM 服务被关闭(防止进程泄漏)
         shutdown_local_llm()

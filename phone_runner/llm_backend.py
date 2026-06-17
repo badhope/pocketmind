@@ -198,7 +198,14 @@ class LLMBackend:
             timeout=timeout,
         )
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        data = resp.json()
+        # 结构校验,防止服务端返回非预期 JSON 时抛 KeyError/IndexError
+        try:
+            return data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError) as e:
+            raise RuntimeError(
+                f"llama-server 返回结构异常: {e}\n原始响应: {str(data)[:500]}"
+            )
 
     def generate(
         self, prompt: str, image_path: Optional[str] = None
@@ -313,8 +320,8 @@ def resolve_model_path(
         models_dir = _MODELS_DIR
     base = Path(models_dir) / model_name
 
-    model_file = info["files"].get("model")
-    mmproj_file = info["files"].get("mmproj")
+    model_file = info.get("files", {}).get("model")
+    mmproj_file = info.get("files", {}).get("mmproj")
 
     result = {
         "model": str(base / model_file) if model_file else None,

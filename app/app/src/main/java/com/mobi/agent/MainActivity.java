@@ -1316,9 +1316,10 @@ public class MainActivity extends AppCompatActivity {
                     } catch (Exception e) {
                         Log.e("MainActivity", "点击失败: " + e.getMessage());
                         responseBuilder.append(" ❌ 点击失败: ").append(e.getMessage());
-                        
-                        // 如果是无障碍服务问题，提示用户重新启用
-                        if (e.getMessage().contains("无障碍服务未启用") || e.getMessage().contains("服务实例为null")) {
+
+                        // 如果是无障碍服务问题,提示用户重新启用
+                        String errMsg = e.getMessage();
+                        if (errMsg != null && (errMsg.contains("无障碍服务未启用") || errMsg.contains("服务实例为null"))) {
                             responseBuilder.append("\n💡 请检查无障碍服务是否正常运行");
                         }
                         return false;
