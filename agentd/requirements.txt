@@ -1,4 +1,4 @@
-fastapi>=0.115,<1
+fastapi>=0.156.4,<1
 # 注意：不要用 uvicorn[standard]。[standard] 会拉入 uvloop / httptools——二者在
 # Termux(aarch64/bionic) 上没有可用 wheel，必须本地编译，极易失败。本机低并发场景
 # 下 uvicorn 自带的纯 Python h11 完全够用，因此这里只装裸 uvicorn。
