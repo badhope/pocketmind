@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PocketMind · 口袋智灵 — 口袋里能真正操作你手机的 Agent</title>
+<meta name="description" content="PocketMind 口袋智灵：运行在安卓 Termux 上的本地优先 AI Agent。41 个本机工具（手机控制 / 任务清单 / 知识库 / 长期记忆）、服务端强制审批、Plan/Act 双模式、MCP 双端、Telegram 网关。数据只留在你自己的设备上。" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="PocketMind · 口袋智灵" />
+<meta property="og:title" content="PocketMind · 口袋智灵 — 口袋里能真正操作你手机的 Agent" />
+<meta property="og:description" content="运行在安卓 Termux 上的本地优先 AI Agent：41 个本机工具、服务端强制审批、Plan/Act、MCP 双端、Telegram 网关、定时任务与备份恢复。数据只留在你自己的设备上。" />
+<meta property="og:image" content="assets/pocketmind-logo.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="theme-color" content="#0b1016" />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 1024'%3E%3Cdefs%3E%3ClinearGradient id='b' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2310b981'/%3E%3Cstop offset='1' stop-color='%2306b6d4'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='1024' height='1024' rx='232' fill='url(%23b)'/%3E%3Cpath d='M312 400a200 200 0 0 0 400 0' fill='none' stroke='%23fff' stroke-width='76' stroke-linecap='round'/%3E%3Cpath d='M312 400h120M592 400h120' stroke='%23fff' stroke-width='76' stroke-linecap='round'/%3E%3Ccircle cx='512' cy='476' r='54' fill='%230b1016' opacity='.92'/%3E%3C/svg%3E" />
+<style>
+:root {
+  --bg: #0b1016;
+  --surface: #111a24;
+  --surface-2: #0f1720;
+  --line: #1e2a38;
+  --text: #d6dee8;
+  --text-dim: #8b98a8;
+  --accent: #10b981;
+  --accent-2: #06b6d4;
+  --grad: linear-gradient(120deg, #10b981, #06b6d4);
+  --maxw: 1080px;
+  --radius: 14px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+::selection { background: rgba(16,185,129,.35); }
+a { color: var(--accent-2); text-decoration: none; }
+a:hover { text-decoration: underline; }
+img { max-width: 100%; display: block; }
+
+/* ===== 背景氛围 ===== */
+body::before {
+  content: "";
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(52rem 30rem at 50% -8%, rgba(16,185,129,.14), transparent 62%),
+    radial-gradient(40rem 26rem at 88% 30%, rgba(6,182,212,.08), transparent 60%);
+}
+
+/* ===== 导航 ===== */
+nav {
+  position: sticky; top: 0; z-index: 20;
+  backdrop-filter: blur(10px);
+  background: rgba(11,16,22,.82);
+  border-bottom: 1px solid var(--line);
+}
+.nav-in {
+  max-width: var(--maxw); margin: 0 auto; padding: 14px 24px;
+  display: flex; align-items: center; gap: 20px;
+}
+.nav-brand { display: flex; align-items: center; gap: 10px; font-weight: 600; color: var(--text); min-height: 44px; padding: 4px 8px; margin-left: -8px; border-radius: 8px; }
+.nav-brand img { width: 30px; height: 30px; border-radius: 8px; }
+.nav-links { margin-left: auto; display: flex; gap: 22px; align-items: center; }
+.nav-links a { color: var(--text-dim); font-size: 14px; }
+.nav-links a:hover { color: var(--text); text-decoration: none; }
+.nav-cta {
+  background: var(--grad); color: #fff !important; font-size: 13px;
+  padding: 8px 16px; border-radius: 999px; font-weight: 600;
+}
+.nav-cta:hover { filter: brightness(1.1); text-decoration: none; }
+
+/* ===== Hero ===== */
+.hero { text-align: center; padding: 96px 24px 72px; }
+.hero-logo { width: 520px; max-width: 92%; margin: 0 auto 8px; }
+.hero h1 {
+  font-size: clamp(30px, 5.4vw, 52px);
+  line-height: 1.18; font-weight: 800; letter-spacing: -.02em;
+  margin: 18px auto 18px; max-width: 17em;
+  background: linear-gradient(120deg, #e8fff4, #d9f6ff 55%, #cfe9ff);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.hero .sub {
+  max-width: 40em; margin: 0 auto 34px; color: var(--text-dim); font-size: 17px;
+}
+.hero-cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+.btn {
+  display: inline-block; padding: 13px 30px; border-radius: 999px;
+  font-weight: 600; font-size: 15px; transition: transform .15s ease, filter .15s ease;
+}
+.btn-primary { background: var(--grad); color: #fff; }
+.btn-primary:hover { filter: brightness(1.12); transform: translateY(-1px); text-decoration: none; }
+.btn-ghost { border: 1px solid var(--line); color: var(--text); }
+.btn-ghost:hover { border-color: var(--accent-2); color: var(--accent-2); transform: translateY(-1px); text-decoration: none; }
+.hero-meta { margin-top: 26px; color: var(--text-dim); font-size: 14px; }
+.hero-meta span { margin: 0 8px; opacity: .5; }
+
+/* ===== 区块 ===== */
+section { max-width: var(--maxw); margin: 0 auto; padding: 64px 24px; }
+.section-head { text-align: center; margin-bottom: 48px; }
+.kicker {
+  display: inline-block; font-size: 12px; letter-spacing: .14em; font-weight: 600;
+  color: var(--accent); text-transform: none; margin-bottom: 12px;
+}
+.section-head h2 { font-size: clamp(24px, 3.4vw, 34px); font-weight: 700; letter-spacing: -.01em; }
+.section-head p { color: var(--text-dim); margin-top: 12px; max-width: 44em; margin-left: auto; margin-right: auto; }
+
+/* ===== 特性 ===== */
+.features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.feat { padding: 30px 28px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--surface); }
+.feat:nth-child(3n) { border-right: none; }
+.feat:nth-last-child(-n+3) { border-bottom: none; }
+.feat .ico { width: 40px; height: 40px; border-radius: 10px; background: rgba(16,185,129,.12); display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
+.feat .ico svg { width: 22px; height: 22px; stroke: var(--accent); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.feat h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
+.feat p { font-size: 13.5px; color: var(--text-dim); }
+
+/* ===== 截图预览 ===== */
+.shots { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start; }
+.shot { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 14px 18px; }
+.shot img { border-radius: 8px; border: 1px solid var(--line); }
+.shot figcaption { text-align: center; color: var(--text-dim); font-size: 13px; margin-top: 12px; }
+.shot.portrait { grid-column: 1 / -1; display: grid; grid-template-columns: 300px 1fr; gap: 26px; align-items: center; }
+.shot.portrait img { width: 300px; margin: 0 auto; }
+.shot.portrait .txt { padding: 8px 12px; }
+.shot.portrait .txt h3 { font-size: 18px; margin-bottom: 8px; }
+.shot.portrait .txt p { color: var(--text-dim); font-size: 14px; }
+
+/* ===== 快速开始 ===== */
+.quick { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px 30px; }
+.quick h3 { font-size: 16px; margin-bottom: 16px; }
+.quick ol { padding-left: 0; list-style: none; counter-reset: q; }
+.quick ol li { counter-increment: q; display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: baseline; margin-bottom: 14px; min-width: 0; }
+.quick ol li > div { min-width: 0; }
+.quick ol li::before {
+  content: counter(q); width: 24px; height: 24px; border-radius: 50%;
+  background: rgba(16,185,129,.14); color: var(--accent);
+  font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+}
+pre {
+  background: #0a0f14; border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px 16px; overflow-x: auto; max-width: 100%; font-size: 13px; line-height: 1.6;
+  font-family: "SF Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
+  color: #b9e6d3;
+}
+pre .c { color: #5c6b7a; }
+.quick-note { margin-top: 16px; color: var(--text-dim); font-size: 13px; }
+
+/* ===== 平台 ===== */
+.plats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.plat {
+  display: flex; align-items: center; gap: 12px; padding: 18px 20px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  color: var(--text); transition: border-color .15s ease, transform .15s ease;
+}
+.plat:hover { border-color: var(--accent-2); transform: translateY(-2px); text-decoration: none; }
+.plat svg { width: 24px; height: 24px; flex-shrink: 0; }
+.plat .pn { font-size: 14px; font-weight: 600; }
+.plat .pu { font-size: 12px; color: var(--text-dim); }
+
+/* ===== Footer ===== */
+footer { border-top: 1px solid var(--line); padding: 40px 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
+footer .brand-line { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 10px; color: var(--text); font-weight: 600; }
+footer .brand-line img { width: 20px; height: 20px; border-radius: 5px; }
+
+/* ===== 动效：滚动揭示（克制） ===== */
+.reveal { opacity: 0; transform: translateY(14px); transition: opacity .6s ease, transform .6s ease; }
+.reveal.in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .reveal { opacity: 1; transform: none; transition: none; }
+}
+
+/* ===== 响应式 ===== */
+@media (max-width: 900px) {
+  .features { grid-template-columns: 1fr; }
+  .feat { border-right: none; }
+  .feat:nth-child(3n) { border-right: none; }
+  .feat:nth-last-child(-n+3) { border-bottom: 1px solid var(--line); }
+  .feat:last-child { border-bottom: none; }
+  .shots { grid-template-columns: 1fr; }
+  .shot.portrait { grid-template-columns: 1fr; }
+  .plats { grid-template-columns: 1fr 1fr; }
+  .hero { padding: 64px 20px 56px; }
+  body { font-size: 16px; }
+  .feat p, .quick-note { font-size: 15px; }
+  .plat .pu { font-size: 13px; }
+  .section-head p { font-size: 15px; }
+}
+@media (max-width: 560px) {
+  .nav-links { display: none; }
+  .plats { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- ===== 导航 ===== -->
+<nav>
+  <div class="nav-in">
+    <a class="nav-brand" href="#top"><img src="assets/pocketmind-icon.png" alt="" />PocketMind</a>
+    <div class="nav-links">
+      <a href="#features">能力</a>
+      <a href="#preview">界面</a>
+      <a href="#quickstart">快速开始</a>
+      <a href="#platforms">开源</a>
+      <a class="nav-cta" href="https://github.com/X33834/pocketmind">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ===== Hero ===== -->
+<header class="hero" id="top">
+  <img class="hero-logo reveal" src="assets/pocketmind-logo.png" alt="PocketMind 口袋智灵" />
+  <h1 class="reveal">口袋里能真正操作你手机的<br />always-on Agent</h1>
+  <p class="sub reveal">PocketMind 运行在你的安卓手机（Termux）上：发短信、看电池、读定位、写文件、执行脚本——全部本地完成，数据只留在你自己的设备上。</p>
+  <div class="hero-cta reveal">
+    <a class="btn btn-primary" href="#quickstart">60 秒跑起来</a>
+    <a class="btn btn-ghost" href="https://github.com/X33834/pocketmind">查看源码</a>
+  </div>
+  <p class="hero-meta reveal">Python · FastAPI · React · 本地 SQLite <span>|</span> 支持 WebUI / PWA / MCP / Telegram <span>|</span> 数据权限 600/700</p>
+</header>
+
+<!-- ===== 特性 ===== -->
+<section id="features">
+  <div class="section-head">
+    <span class="kicker">CORE ABILITIES</span>
+    <h2>不是聊天机器人，是你的手机管家</h2>
+    <p>41 个本机工具被当作一等公民深度集成——从短信、定位、传感器到任务清单、知识库与长期记忆，这是 PocketMind 与桌面 Agent 们最大的区别。</p>
+  </div>
+  <div class="features reveal">
+    <div class="feat">
+      <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="4.2"/></svg></div>
+      <h3>手机感知</h3>
+      <p>电池、定位、传感器、WiFi、剪贴板、通知、短信、电话——25 个 termux-api 原生工具，加上 shell 和文件读写。</p>
+    </div>
+    <div class="feat">
+      <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.6-3 8.4-7 10-4-1.6-7-5.4-7-10V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg></div>
+      <h3>本地优先 · 隐私保护</h3>
+      <p>会话、消息、记忆、定时任务全部存本机 SQLite（权限 600/700），默认只监听 127.0.0.1，LLM 只负责推理。</p>
+    </div>
+    <div class="feat">
+      <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg></div>
+      <h3>服务端强制审批</h3>
+      <p>写文件、shell、发短信、拨号等危险操作由服务端审批门强制拦截，超时自动拒绝——模型被注入也绕不过。</p>
+    </div>
+    <div class="feat">
+      <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 4l2 5 5 1-4 4 1 6-4-3-4 3 1-6-4-4 5-1 2-5z"/></svg></div>
+      <h3>Plan / Act 双模式</h3>
+      <p>「先计划」先给执行计划等你批准再动手；「直接执行」收到任务即调用工具。复杂任务不失控。</p>
+    </div>
+    <div class="feat">
+      <div class="ico"><svg viewBox="0 0 24 24"><path d="M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/><path d="M2 8h20"/><rect x="5" y="11" width="5" height="4" rx="1"/></svg></div>
+      <h3>知识库与技能</h3>
+      <p>用户资料存本机知识库，只在你发问时用它检索；技能按 SKILL.md 渐进披露，不占上下文。任务清单一并落库，刷新不丢。</p>
+    </div>
+    <div class="feat">
+      <div class="ico"><svg viewBox="0 0 24 24"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 9h8M8 13h5"/></svg></div>
+      <h3>MCP 双端</h3>
+      <p>既把 41 个本机工具暴露为标准 MCP Server（stdio），也能接入外部 MCP Server；按注解自动区分只读与危险工具。</p>
+    </div>
+    <div class="feat">
+      <div class="ico"><svg viewBox="0 0 24 24"><path d="M8 11a4 4 0 1 1 8 0M8 11v2a1 1 0 0 1-1 1H5a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h6"/><path d="M16 11a4 4 0 1 1 8 0M16 11v2a1 1 0 0 0 1 1h2a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-6"/></svg></div>
+      <h3>Telegram 网关</h3>
+      <p>出门在外用 Telegram 发消息控制手机，危险操作弹内联审批按钮，与网页共用同一把审批锁。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 界面预览 ===== -->
+<section id="preview">
+  <div class="section-head">
+    <span class="kicker">INTERFACE</span>
+    <h2>看一眼长什么样</h2>
+    <p>真实录制的运行界面：审批、工具结果、会话、设置、实时统计、定时任务、手机竖屏。</p>
+    <p style="margin-top:14px"><a class="btn btn-ghost" href="assets/pocketmind-demo.mp4">观看 39 秒演示视频</a></p>
+  </div>
+  <div class="shots reveal">
+    <figure class="shot">
+      <img src="assets/screenshot-tool.png" alt="工具调用界面" />
+      <figcaption>桌面端 · 电池 + WiFi 工具调用链路</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="assets/screenshot-recipes.png" alt="定时配方" />
+      <figcaption>定时任务 · 配方一键创建</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="assets/screenshot-settings.png" alt="设置面板" />
+      <figcaption>设置 · 模型厂商 / Plan-Act / 权限安全</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="assets/screenshot-stats.png" alt="运行统计" />
+      <figcaption>运行统计 · 请求 / LLM / token / 工具失败（真实计数器）</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="assets/screenshot-sessions.png" alt="会话管理" />
+      <figcaption>会话管理 · 置顶 / 重命名 / 跨会话正文搜索</figcaption>
+    </figure>
+    <figure class="shot portrait">
+      <img src="assets/screenshot-mobile.png" alt="手机竖屏界面" />
+      <div class="txt">
+        <h3>手机才是它的主场</h3>
+        <p>竖屏 WebUI 与 PWA，随时装进口袋。浏览器打开 <code>http://127.0.0.1:8787</code> 即用，可添加至主屏幕离线使用。</p>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<!-- ===== 快速开始 ===== -->
+<section id="quickstart">
+  <div class="section-head">
+    <span class="kicker">QUICK START</span>
+    <h2>60 秒跑起来</h2>
+  </div>
+  <div class="quick reveal">
+    <h3>手机 Termux 上</h3>
+    <ol>
+      <li>
+        <div>
+          <p>安装 Termux 与 Termux:API 后，克隆并安装依赖：</p>
+<pre><code><span class="c"># 在 Termux 里</span>
+pkg install git python termux-api
+git clone https://github.com/X33834/pocketmind
+cd pocketmind &amp;&amp; bash termux/install.sh</code></pre>
+        </div>
+      </li>
+      <li>
+        <div>
+          <p>一键启动（自动装依赖、生成安全令牌、以 --lan 常驻）：</p>
+<pre><code>bash termux/start.sh</code></pre>
+        </div>
+      </li>
+      <li>
+        <div>
+          <p>浏览器打开 <code>http://127.0.0.1:8787</code>，在「设置」里填 LLM 的 base_url 与 API Key，开聊。</p>
+        </div>
+      </li>
+    </ol>
+    <p class="quick-note">想先体验全链路？<code>python3 -m agentd.main --mock --port 8787</code> 离线演示模式，不消耗任何 API 额度。</p>
+  </div>
+</section>
+
+<!-- ===== 开源平台 ===== -->
+<section id="platforms">
+  <div class="section-head">
+    <span class="kicker">OPEN SOURCE</span>
+    <h2>开源 · 同步五个仓库</h2>
+    <p>本地优先、隐私保护、Apache-2.0 协议。欢迎 Star、提 Issue、贡献代码。</p>
+  </div>
+  <div class="plats reveal">
+    <a class="plat" href="https://github.com/X33834/pocketmind">
+      <svg viewBox="0 0 24 24" fill="#d6dee8"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .9.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.2-.4-1.2.1-2.6 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.6.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9v2.9c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></svg>
+      <div><div class="pn">GitHub · X33834</div><div class="pu">github.com/X33834/pocketmind</div></div>
+    </a>
+    <a class="plat" href="https://github.com/Morningstar202604/pocketmind">
+      <svg viewBox="0 0 24 24" fill="#d6dee8"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .9.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.2-.4-1.2.1-2.6 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.6.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9v2.9c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></svg>
+      <div><div class="pn">GitHub · Morningstar202604</div><div class="pu">github.com/Morningstar202604/pocketmind</div></div>
+    </a>
+    <a class="plat" href="https://gitee.com/badhope/pocketmind">
+      <svg viewBox="0 0 24 24" fill="#d6dee8"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm5.5 9.2c-1.6.2-2.6-.1-2.6-1.6V6.9c0-1.2-.8-2-2-2h-1.8v7.3H8V6.9c0-1.2-.8-2-2-2H4.2c0-1.2.9-2.1 2.1-2.1h3.3c1.6 0 2.6 1 2.6 2.5v6.3h3.6c1.5 0 2.4-.9 2.4-2.4v-.2c-.1-.4.1-.6.5-.6z"/></svg>
+      <div><div class="pn">Gitee · badhope</div><div class="pu">gitee.com/badhope/pocketmind</div></div>
+    </a>
+    <a class="plat" href="https://github.com/badhope/pocketmind">
+      <svg viewBox="0 0 24 24" fill="#d6dee8"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .9.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.2-.4-1.2.1-2.6 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.6.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9v2.9c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></svg>
+      <div><div class="pn">GitHub · badhope</div><div class="pu">github.com/badhope/pocketmind</div></div>
+    </a>
+    <a class="plat" href="https://gitcode.com/badhope/pocketmind">
+      <svg viewBox="0 0 24 24" fill="#d6dee8"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm3 14.5c-1 .4-2 .6-3 .6s-2-.2-3-.6c-.4-.1-.5-.3-.3-.6l.8-2c.1-.3.4-.4.7-.4h3.6c.3 0 .6.1.7.4l.8 2c.2.3.1.5-.3.6zM8.5 11c-.3 0-.5-.2-.5-.5V8.5c0-.3.2-.5.5-.5s.5.2.5.5v2c0 .3-.2.5-.5.5zm7 0c-.3 0-.5-.2-.5-.5V8.5c0-.3.2-.5.5-.5s.5.2.5.5v2c0 .3-.2.5-.5.5z"/></svg>
+      <div><div class="pn">GitCode · badhope</div><div class="pu">gitcode.com/badhope/pocketmind</div></div>
+    </a>
+  </div>
+</section>
+
+<!-- ===== Footer ===== -->
+<footer>
+  <div class="brand-line"><img src="assets/pocketmind-icon.png" alt="" />PocketMind · 口袋智灵</div>
+  <p>本地优先 · 隐私保护 · 数据只在你自己的设备上</p>
+  <p style="margin-top:6px;opacity:.7">Apache-2.0 License · Built with Python · FastAPI · React</p>
+</footer>
+
+<script>
+// 滚动揭示（克制）：IntersectionObserver，仅一次
+(function () {
+  var els = document.querySelectorAll(".reveal");
+  if (!("IntersectionObserver" in window)) {
+    els.forEach(function (el) { el.classList.add("in"); });
+    return;
+  }
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+    });
+  }, { threshold: 0.12, rootMargin: "0px 0px -40px 0px" });
+  els.forEach(function (el) { io.observe(el); });
+})();
+</script>
+</body>
+</html>
