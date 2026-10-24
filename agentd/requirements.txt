@@ -13,7 +13,7 @@ pydantic>=2.0,<3
 pydantic-settings>=2.0,<3
 mcp>=1.0
 sqlalchemy[asyncio]>=2.0,<3
-aiosqlite>=0.19
+aiosqlite>=0.22.1
 # fastapi 传递依赖：python-multipart 0.0.20 有多个 CVE（PYSEC-2026-*），这里显式抬地板
 python-multipart>=0.0.31
 # 全局限流（main.py 的 create_app 无条件挂载 rate_limit 中间件）
