@@ -149,6 +149,8 @@ local.properties
 *.aab
 *.keystore
 *.jks
+# 发布签名配置里有明文 storePassword / keyPassword，绝不能入库
+keystore.properties
 **/apk-shell/.gradle/
 **/apk-shell/app/build/
 **/apk-shell/build/
