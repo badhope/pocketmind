@@ -378,8 +378,19 @@ const _storeCreator: StateCreator<AgentStore, [], []> = (set, get) => {
       }
       const list = await get().refreshSessions();
       if (list.length === 0) {
-        const s = await api.post<{ session_id: string }>("/api/sessions", {});
-        await get().loadSession(s.session_id);
+        let created: { session_id: string } | null = null;
+        try {
+          created = await api.post<{ session_id: string }>("/api/sessions", {});
+        } catch (e) {
+          // 401 时创建会话同样会失败：不要留一个空白的"已连接"界面，
+          // 直接给令牌入口（否则用户看到的是一句话都发不出去的聊天框）。
+          if (isUnauthorized(e)) {
+            set({ needToken: true });
+            return;
+          }
+          throw e;
+        }
+        if (created?.session_id) await get().loadSession(created.session_id);
       } else {
         await get().loadSession(list[0].id);
       }
