@@ -142,24 +142,33 @@ class SchedulerService:
         Termux 上装 `termux-tools` 会提供 TZ 环境变量；未装时退回 UTC。
         定时任务的语义是「到点执行」，用 UTC 只会让"每天 8 点"按 UTC 解释，
         对个人助手可以接受（且可在设置里通过 TZ 覆盖），远好于启动即崩。
+
+        实现说明（2026-10-29 修复）：不能再用 `from apscheduler.util import timezone`。
+        apscheduler 3.10 里该名字是 pytz.timezone（接受字符串），而 3.11 起
+        `apscheduler.util.timezone` 变成了 `datetime.timezone` 类 —— 传字符串直接
+        TypeError，被 except 吞掉后永远落到 UTC。"每天 8 点"于是变成"每天 16 点"
+        且没有任何报错。改为显式用 zoneinfo（Python 3.9+ 标准库）。
         """
         import logging as _logging
         import os as _os
 
-        from apscheduler.util import timezone as _tz_util
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:  # pragma: no cover —— Python < 3.9，本项目已要求 3.11+
+            ZoneInfo = None  # type: ignore[assignment]
 
         candidates = []
         tz_env = _os.environ.get("TZ", "").strip()
         if tz_env:
             candidates.append(tz_env.lstrip(":"))
         candidates += ["Asia/Shanghai", "UTC"]
-        for name in candidates:
-            try:
-                return _tz_util(name)
-            except Exception:  # noqa: BLE001 —— 取不到就试下一个
-                continue
-        # 连 UTC 都取不到（tzdata 完全缺失）→ 用固定偏移时区，APScheduler 接受
-        # pytz 兼容对象；再失败就返回 None（APScheduler 会退回它自己的默认处理）。
+        if ZoneInfo is not None:
+            for name in candidates:
+                try:
+                    return ZoneInfo(name)
+                except Exception:  # noqa: BLE001 —— 取不到就试下一个
+                    continue
+        # 连 UTC 的 zoneinfo 都取不到（tzdata 完全缺失）→ 用固定偏移时区
         _logging.getLogger(__name__).warning(
             "系统无可用时区数据，定时任务按 UTC 运行；可设置 TZ 环境变量覆盖"
         )

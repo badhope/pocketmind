@@ -108,6 +108,37 @@ DATA_DIR="$HOME/.agent/termux-agent"
 mkdir -p "$DATA_DIR/logs"
 chmod 700 "$DATA_DIR"
 
+# ── 访问令牌（Android 上 127.0.0.1 是全机共享的，必须鉴权）──────────────────
+# 背景：安卓没有"只有本机进程能连的端口"，任何 App 都能连 127.0.0.1:8787。
+# 若 agentd 无令牌，同机任意应用都可以读你的全部会话、调用 shell 工具。
+# 因此安装时生成随机令牌：
+#   1. 写 $DATA_DIR/token（600），start.sh 会作为 AGENT_TOKEN 注入；
+#   2. 同一份值由 APK 壳通过 Termux 读出并注入 WebView，用户无需手抄。
+# 已有令牌时不覆盖（重装不应让已登录的客户端失效）。
+TOKEN_FILE="$DATA_DIR/token"
+if [ ! -s "$TOKEN_FILE" ]; then
+  # 生成 32 字节随机 → 64 hex。多级回退，任一步成功即可：
+  #   1. python（下一步装依赖本来就用它）
+  #   2. od /dev/urandom（coreutils 齐全时）
+  #   3. 都不可用 → 不阻断安装：agentd 在 Android 上首次启动会自己生成并落盘
+  #      （见 agentd/main.py 的 _is_android_runtime 分支），安全性不打折。
+  TOKEN="$(python -c 'import secrets;print(secrets.token_hex(32))' 2>/dev/null || true)"
+  if [ -z "$TOKEN" ] && [ -r /dev/urandom ] && command -v od >/dev/null 2>&1; then
+    TOKEN="$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
+  fi
+  if [ -n "$TOKEN" ]; then
+    umask 077
+    printf '%s' "$TOKEN" > "$TOKEN_FILE"
+    chmod 600 "$TOKEN_FILE"
+    echo "已生成访问令牌（保存在 $TOKEN_FILE，权限 600）"
+  else
+    echo "⚠️  暂时无法生成访问令牌；agentd 首次启动时会自动生成（无需手工处理）"
+  fi
+else
+  chmod 600 "$TOKEN_FILE" 2>/dev/null || true
+  echo "访问令牌已存在，保留原值"
+fi
+
 step "4/4 可选能力（按需，跳过不影响主功能）"
 echo ""
 echo "a) 离线语音（完全本地 TTS，约 135MB）：见 termux/voice.md"

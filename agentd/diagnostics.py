@@ -103,18 +103,47 @@ def _probe_termux() -> dict:
 
 
 def _probe_port(host: str, port: int) -> dict:
-    """端口是否可绑定：被占用时启动会直接失败，提前告诉用户换端口。"""
+    """端口状态：要么「正在被本服务监听」，要么「可绑定」，两者都算正常。
+
+    修复（2026-10-29）：此前直接 bind 该端口，而本函数是在服务**已启动**后
+    由 /api/diagnostics 调用的 —— 端口必然被自己占用，于是每次自检都报
+    「端口被占用，请换端口」，用户一进设置就看到一条假故障。
+    现在先尝试 connect：连得上说明是本服务在监听（正常）；连不上再试 bind，
+    绑不上才是真被别的进程占用。
+    """
+    def _listening() -> bool:
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                return True
+        except OSError:
+            return False
+
+    if _listening():
+        return {
+            "id": "port",
+            "title": "监听端口",
+            "status": "ok",
+            "detail": f"{host}:{port} 正在监听（本服务运行中）",
+            "fix": "",
+        }
+
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind((host, port))
-        return {"id": "port", "title": "监听端口", "status": "ok", "detail": f"{host}:{port} 可用", "fix": ""}
+        return {
+            "id": "port",
+            "title": "监听端口",
+            "status": "ok",
+            "detail": f"{host}:{port} 可用（当前未监听）",
+            "fix": "",
+        }
     except OSError as e:
         return {
             "id": "port",
             "title": "监听端口",
             "status": "fail",
-            "detail": f"{host}:{port} 被占用（{e.strerror or e}）",
+            "detail": f"{host}:{port} 被其他进程占用（{e.strerror or e}）",
             "fix": f"换一个端口：python -m agentd.main --port {port + 1}",
         }
     finally:
