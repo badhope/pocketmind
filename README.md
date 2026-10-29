@@ -153,7 +153,7 @@ with termux-api; web search and cloud models require outbound network.
 # 1. One-time setup in Termux
 pkg install git python termux-api
 git clone https://gitcode.com/badhope/pocketmind.git && cd pocketmind
-bash termux/install.sh          # Python/compile toolchain + deps + data dir (pydantic-core needs a one-off Rust build, ~3-8 min)
+bash termux/install.sh          # Python/compile toolchain + deps + data dir (pydantic-core needs a one-off Rust build; ~10-30 min on a phone, ~50 min on an emulator)
 
 # 2. Start the service
 bash termux/start.sh            # default http://127.0.0.1:8787

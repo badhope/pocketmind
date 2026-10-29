@@ -4,7 +4,63 @@
 
 ## [Unreleased]
 
-（暂无）
+## [1.2.1] - 2026-10-29
+
+### 修复（Android 交付化专项，问题台账见 `docs/audit-2026-10-29.md`）
+
+- **仓库从未产出过 APK，干净克隆也构建不出来**：`.gitignore` 的 `*.jar` 把
+  `gradle-wrapper.jar` 一并排除，`./gradlew` 直接 `ClassNotFoundException:
+  GradleWrapperMain` —— 而文档恰恰让人用 `./gradlew`。现在 wrapper jar 入库，
+  新增 `scripts/build-apk.sh`（本地/CI 同一份逻辑）与 CI `android` job
+  （lint + assembleDebug + assembleRelease + 签名/对齐/版本校验 + 上传制品）。
+- **APK 版本号与后端不一致**：壳停在 `1.0.0`，后端与前端是 `1.2.0`。版本改为
+  `gradle.properties` 单源，新增 `tests/check_version.py` 做一致性门禁。
+- **Android 13 上前台服务启动即崩**：manifest 只声明 `specialUse`，而
+  `MonitorService` 在 API 33 传 `FOREGROUND_SERVICE_TYPE_DATA_SYNC`；
+  运行时类型必须是 manifest 声明的子集，否则 `startForeground` 抛异常。
+  manifest 改为 `specialUse|dataSync` 并补 `FOREGROUND_SERVICE_DATA_SYNC` 权限。
+- **"保活"在退出界面后失效**：`MainActivity.onDestroy` 调了 `stopMonitorService()`，
+  用户一退出 App 前台服务就被杀。移除该调用。
+- **WebView 桥缺少信任边界**：没有 `shouldOverrideUrlLoading`，任意链接都在带
+  `PocketNative` 桥的 WebView 里打开；`deployAgent(repoUrl)` 还把 URL 直接拼进
+  shell 命令。现在只允许 `127.0.0.1`/`localhost`/`file:///android_asset`，
+  外链交给系统浏览器；桥方法逐个校验当前页面 URL；仓库地址做字符集校验 + POSIX
+  单引号转义；默认地址改由 `resValue` 注入（Java 与引导页同源）。
+- **Android 上 127.0.0.1 无鉴权等于全机可读**：`check_token` 在令牌为空时直接放行，
+  而安卓的回环端口是全机共享命名空间，同机任意 App 都能读会话、调用 shell。
+  现在 `install.sh` 生成随机令牌（600）、`start.sh` 自动注入、后端在 Android 运行时
+  自动生成并落盘；壳通过 Termux 读出令牌注入 WebView；非壳环境（浏览器/PWA）
+  首屏给出令牌输入层 —— 此前令牌入口只在设置面板里，而设置面板本身需要令牌，
+  首次用 `--lan` 启动的用户必然 401 死锁。
+- **定时任务时区恒退 UTC**：`apscheduler.util.timezone` 在 3.11 起是
+  `datetime.timezone` 类，传字符串抛 `TypeError` 被吞，导致"每天 8 点"按 UTC
+  触发（北京时间 16 点）。改用 `zoneinfo.ZoneInfo`，TZ → Asia/Shanghai → UTC 降级。
+- **环境自检端口项恒报错**：`_probe_port` bind 服务自己正在监听的端口，
+  每个用户首次打开设置都会看到一条假故障。改为先 connect 判断"正在监听"。
+- **错误页拼写与按钮**：`~/poketmind` → `~/pocketmind`；「启动服务」原先只把
+  Termux 拉到前台、不执行 `start.sh`，现在真正调用 `startAgent`。
+- **前端产物 ES2020，老 WebView 可能白屏**：构建目标降到 `es2017`。
+- **`native.ts` 桥声明不全**：补 `notify/readToken/getRepoUrl/deployAgent/
+  startAgent/checkAgain/openFdroid`，非壳环境全部安全降级。
+- **APK 清单**：`allowBackup=false`（令牌不进云备份）、
+  `usesCleartextTraffic=false`（明文只对 127.0.0.1 放行）；cutout 属性移到
+  `values-v27`（minSdk 26 不再报 NewApi）、新增 `values-v35` 退出强制
+  edge-to-edge、`registerReceiver` 补未导出标志 —— `lintDebug` 从 2 error 到 0。
+
+### 新增
+
+- `smoke/p32_android_delivery_test.py`（22 项）：回环鉴权、时区、端口自检、
+  `start.sh` 参数解析。
+- `tests/check_version.py`：版本三处一致性门禁。
+- `scripts/build-apk.sh`：一条命令构建 + 产物校验。
+- `agentd/web/src/components/TokenGate.tsx`：首屏令牌输入层。
+
+### 文档
+
+- `docs/audit-2026-10-29.md`：完整问题台账（A/B/C 三级共 22 项）。
+- 安装耗时统一改为「真机 10-30 分钟 / 模拟器约 50 分钟」（原写 3-8 分钟，
+  与项目自己的实测文档差一个数量级）。
+- 工具数 31 → 41、测试套件 33 → 39。
 
 ## [1.2.0] - 2026-10-24
 

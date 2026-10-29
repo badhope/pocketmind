@@ -149,7 +149,7 @@
 # 1. 手机侧一次性准备（Termux 里执行）
 pkg install git python termux-api
 git clone <本仓库地址> && cd pocketmind
-bash termux/install.sh          # 装 Python/编译工具链 + 依赖 + 数据目录（pydantic-core 首次需用 Rust 现场编译，约 3-8 分钟）
+bash termux/install.sh          # 装 Python/编译工具链 + 依赖 + 数据目录（pydantic-core 首次需 Rust 现场编译，真机约 10-30 分钟；模拟器实测约 50 分钟）
 
 # 2. 启动服务
 bash termux/start.sh            # 默认 http://127.0.0.1:8787
@@ -182,7 +182,7 @@ AGENT_HOME=/tmp/pa python3 -m agentd.main --port 8787
 | `agentd/web/` | React 前端（Vite+TS），构建产物 `dist/` 由 agentd 直接托管 |
 | `termux/` | 手机端：`install.sh` 一键装依赖 / `start.sh` 启动 / `boot.sh` 开机自启 |
 | `config/` | 预设配方 `recipes.json`（定时任务模板）；LLM 厂商预设见 `agentd/config.py` 的 `PRESETS` |
-| `smoke/` | 回归测试 33 个套件（agent 深度 / 排队 / 定时任务 / 安全 / 配方 / MCP / Telegram / 横向审计 / 审批单测；POSIX 专用检查在非 Linux 上记为「跳过」而非失败），全部由 `tests/run_all.sh` 统一调度 |
+| `smoke/` | 回归测试 39 个套件（agent 深度 / 排队 / 定时任务 / 安全 / 配方 / MCP / Telegram / 横向审计 / 审批单测；POSIX 专用检查在非 Linux 上记为「跳过」而非失败），全部由 `tests/run_all.sh` 统一调度 |
 
 ---
 

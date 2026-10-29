@@ -38,12 +38,39 @@
 
 ### 构建步骤
 
-1. 电脑安装 **Android Studio**（自带 SDK + Gradle），或已有 Android SDK + JDK 17；
+**推荐：一条命令（本地与 CI 同一份逻辑）**
+
+```bash
+# 前置：JDK 17+、Android SDK（platforms;android-35 + build-tools;35.0.0）
+export ANDROID_HOME=/path/to/android-sdk
+bash scripts/build-apk.sh              # debug APK，可直接 adb install
+bash scripts/build-apk.sh --release    # release；未配签名时产物明确命名为 *-unsigned.apk
+bash scripts/build-apk.sh --lint       # 只跑 lint（0 error 才放行）
+```
+
+**或手动 / Android Studio**
+
+1. 安装 **Android Studio**（自带 SDK + Gradle），或已有 Android SDK + JDK 17；
 2. 用 Android Studio 打开 `termux/apk-shell/` 目录；
 3. 首次构建前确认 `local.properties` 中的 `sdk.dir` 指向你的 Android SDK 路径；
-4. Build → Generate Signed APK（首次需创建签名），或直接 `./gradlew assembleDebug`
-   产出 `app/build/outputs/apk/debug/app-debug.apk` 用于真机安装调试；
-5. 把 APK 装到手机（`adb install` 或直接传输安装）。
+4. `./gradlew assembleDebug` → `app/build/outputs/apk/debug/app-debug.apk`；
+5. 把 APK 装到手机（`adb install -r` 或直接传输安装）。
+
+**发布签名（可选）**：在 `termux/apk-shell/keystore.properties` 写
+
+```properties
+storeFile=release.keystore
+storePassword=***
+keyAlias=pocketmind
+keyPassword=***
+```
+
+放在同目录的 keystore 文件不入库（`.gitignore` 已排除 `*.keystore` / `*.jks`）。
+配置后 `--release` 产出的就是已签名、可直接分发的 APK；版本号由 `gradle.properties`
+的 `POCKET_VERSION_NAME/CODE` 提供，并由门禁 `tests/check_version.py` 保证与后端一致。
+
+**版本一致性**：`agentd/main.py`、`agentd/web/package.json`、`termux/apk-shell/gradle.properties`
+三处必须相同，`bash tests/run_all.sh` 会校验。
 
 ### 首次使用流程（真机）
 
@@ -52,12 +79,16 @@
 2. 打开口袋智灵 App，进入引导页：
    - 若未安装 Termux → 点击「打开 Termux 下载页」；
    - 点击「一键部署」，**第一次时 Termux 会弹出「允许运行命令」授权，请允许**；
-   - 部署过程在 Termux 中自动进行（约 3-8 分钟，首次需编译 pydantic-core）；
+   - 部署过程在 Termux 中自动进行（真机约 10-30 分钟，首次需编译 pydantic-core；模拟器实测约 50 分钟）；
 3. 部署完成后回到 App，点击「检查连接」，就绪后自动进入聊天界面；
 4. 在设置里选择 LLM 厂商并填入 API Key，开始使用。
 
 ### 注意事项
 
+- **访问令牌是强制的**：Android 上 `127.0.0.1` 是全机共享命名空间，任何 App 都能连。
+  `install.sh` 首次安装时生成随机令牌（`~/.agent/termux-agent/token`，权限 600），
+  `start.sh` 自动注入；APK 壳通过 Termux 读出并交给 WebView，用户无需手抄。
+  用浏览器/PWA 访问时需要手动粘贴一次（页面会直接给出输入框与 `cat` 命令）。
 - 一键部署依赖 Termux 的 `RUN_COMMAND` 授权（Termux 设置 → 允许运行命令）；
 - 若一键部署失败，可改用「复制启动命令」在 Termux 中手动执行排查；
 - 数据全部保存在手机本地（`~/.agent/termux-agent`），卸载 App 不影响已部署的后端；
