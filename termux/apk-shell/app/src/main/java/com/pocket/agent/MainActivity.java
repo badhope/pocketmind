@@ -91,7 +91,15 @@ public class MainActivity extends Activity {
         s.setSupportZoom(false);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
         s.setLoadsImagesAutomatically(true);
-        s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        // 混合内容：本服务是 http://127.0.0.1，页面资源也全是 http，
+        // 从不需要在 https 页面里加载 http 资源。设为 NEVER_ALLOW 收紧攻击面。
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        // 壳只加载本机服务与内置 assets，不需要读取任意本地文件 / content://。
+        // 关掉这些开关可以缩小 WebView 被滥用时的可达范围。
+        s.setAllowFileAccess(false);
+        s.setAllowContentAccess(false);
+        s.setGeolocationEnabled(false);
+        s.setSaveFormData(false);
 
         // 调试版本开启 WebView 远程调试，chrome://inspect 即可联调
         if (BuildConfig.DEBUG) {
