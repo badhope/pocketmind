@@ -4,7 +4,10 @@ fastapi>=0.115,<1
 # 下 uvicorn 自带的纯 Python h11 完全够用，因此这里只装裸 uvicorn。
 uvicorn>=0.30
 openai>=1.40
-apscheduler>=3.10
+# 上限 <4：3.11 把 util.timezone 从 pytz 工厂换成了 datetime.timezone 类，
+# 曾让时区解析静默退化成 UTC（见 docs/audit-2026-10-29.md B2）。4.x 还会有破坏性变更，
+# 升级时须重跑 smoke/p32。
+apscheduler>=3.10,<4
 sse-starlette>=2.1
 # 上限不是摆设：pydantic v3 会改 API，而 >=2.0 会在某天被 pip 静默升上去，
 # 然后所有用户在重装时一起挂（本仓库已经因为 mcp 1.x→2.x 的改名做过一次兼容分支）。
