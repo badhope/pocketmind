@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { BatteryGuide } from "./BatteryGuide";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import {
   api,
@@ -460,6 +461,9 @@ export function SettingsPanel({
 
         {/* 环境自检：放在最前面——用户打开设置往往就是因为「哪里不对」 */}
         <DiagnosticsPanel api={api} />
+
+        {/* 后台保活：仅 Android 壳且未豁免电池优化时出现 */}
+        <BatteryGuide />
 
         {/* 外观 */}
         <CollapsibleGroup title="外观" summary={theme === "dark" ? "深色" : theme === "light" ? "浅色" : "跟随系统"} defaultOpen>

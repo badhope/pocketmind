@@ -28,6 +28,10 @@ interface PocketNativeBridge {
   openFdroid?: () => void;
   /** 把文本保存为文件（WebView 里 <a download> 不生效，走原生保存）；返回保存路径 */
   saveTextFile?: (fileName: string, content: string) => string;
+  /** 系统是否已豁免本应用的电池优化 */
+  isBatteryOptimizationIgnored?: () => boolean;
+  /** 打开系统的「忽略电池优化」申请页 */
+  requestIgnoreBatteryOptimization?: () => void;
 }
 
 declare global {
@@ -185,5 +189,34 @@ export function saveTextFile(fileName: string, content: string): string | null {
     return path && path.length > 0 ? path : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * 电池优化是否已豁免。
+ *
+ * Android 的 Doze 在锁屏后限制后台网络与 CPU —— agentd 跑在 Termux 里，
+ * 一旦被冻结，SSE 断开、定时任务不触发、审批提醒收不到。
+ * 非壳环境返回 true（浏览器没有这个概念，不显示引导）。
+ */
+export function isBatteryOptimizationIgnored(): boolean {
+  const bridge = getBridge();
+  if (!bridge?.isBatteryOptimizationIgnored) return true;
+  try {
+    return bridge.isBatteryOptimizationIgnored();
+  } catch {
+    return true;
+  }
+}
+
+/** 打开系统的「忽略电池优化」申请页（仅壳内）。 */
+export function requestIgnoreBatteryOptimization(): boolean {
+  const bridge = getBridge();
+  if (!bridge?.requestIgnoreBatteryOptimization) return false;
+  try {
+    bridge.requestIgnoreBatteryOptimization();
+    return true;
+  } catch {
+    return false;
   }
 }

@@ -29,9 +29,20 @@
     </queries>
 
     <!--
+      电池优化豁免：Android 的 Doze/App Standby 会在锁屏后冻结后台进程，
+      前台服务虽不被直接杀，但网络与 CPU 会被限制，agentd 掉线检测和定时
+      任务回调都会延迟。此权限仅用于引导用户手动加入白名单（旁加载分发，
+      不走 Play 政策）；不申请会被系统忽略请求。
+    -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!--
       allowBackup=false：本应用持有局域网访问令牌（存在 WebView localStorage），
       Android 默认的自动备份会把它同步到云端，与「数据只留在设备上」的承诺冲突。
       usesCleartextTraffic=false：明文只由 network_security_config 对 127.0.0.1 放行。
+      enableOnBackInvokedCallback=true：Android 13+ 走预测性返回，
+      由 OnBackInvokedDispatcher 接管（见 MainActivity），否则返回手势会直接退出应用，
+      WebView 的历史回退失效。
     -->
     <application
         android:label="@string/app_name"
@@ -40,6 +51,7 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
+        android:enableOnBackInvokedCallback="true"
         android:theme="@style/AppTheme"
         android:supportsRtl="true">
 

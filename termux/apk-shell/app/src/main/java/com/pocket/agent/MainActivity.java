@@ -126,6 +126,9 @@ public class MainActivity extends Activity {
         registerMonitorReceiver();
         registerTokenReceiver();
         startMonitorService();
+        // Android 13+ 预测性返回：必须显式注册回调，否则返回手势直接退出应用，
+        // WebView 的历史回退（在设置面板里返回上一层）失效。
+        registerBackHandler();
         // 尽力从 Termux 读取访问令牌（后台，不阻塞首屏）
         new Thread(this::requestTokenFromTermux).start();
     }
@@ -457,16 +460,45 @@ public class MainActivity extends Activity {
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
-            if (agentdUnreachable) {
-                finish();
-                return true;
-            }
-            if (web.canGoBack()) {
-                web.goBack();
-                return true;
-            }
+            if (handleBack()) return true;
         }
         return super.onKeyDown(keyCode, event);
+    }
+
+    /**
+     * 统一的返回逻辑：错误页退出，否则 WebView 能后退就后退。
+     * 两套入口共用它 —— 旧版 onKeyDown 与 Android 13+ 的预测性返回回调。
+     */
+    private boolean handleBack() {
+        if (agentdUnreachable) {
+            finish();
+            return true;
+        }
+        if (web != null && web.canGoBack()) {
+            web.goBack();
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Android 13+ 预测性返回（predictive back）。
+     *
+     * manifest 里开了 enableOnBackInvokedCallback 后，系统手势不再走 onKeyDown，
+     * 必须注册 OnBackInvokedCallback，否则用户一划就退出整个应用 ——
+     * 而不是先关闭设置面板/返回上一页。低版本保持原 onKeyDown 路径。
+     */
+    private void registerBackHandler() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return;
+        try {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                    () -> {
+                        if (!handleBack()) finish();
+                    });
+        } catch (Exception e) {
+            Log.d(TAG, "registerBackHandler unavailable: " + e.getMessage());
+        }
     }
 
     @Override
@@ -810,6 +842,28 @@ public class MainActivity extends Activity {
             return activity.writeTextToDownloads(name, content == null ? "" : content);
         }
 
+        /**
+         * 电池优化是否已豁免（前端据此决定是否显示"保持后台运行"引导）。
+         *
+         * 为什么需要：Android 的 Doze 会在锁屏后限制后台网络与 CPU。
+         * agentd 是跑在 Termux 里的独立进程，本壳只负责提醒；但若系统把
+         * Termux 冻结，SSE 会断、定时任务不触发、审批提醒收不到。
+         * Termux / Andronix / UserLAnd 这类常驻应用的官方指引都是
+         * 「设置 → 电池 → 不受限制」。
+         */
+        @android.webkit.JavascriptInterface
+        public boolean isBatteryOptimizationIgnored() {
+            if (!activity.bridgeAllowed()) return true;
+            return activity.checkBatteryOptimizationIgnored();
+        }
+
+        /** 打开系统的「忽略电池优化」申请页；系统不支持时退到应用详情页。 */
+        @android.webkit.JavascriptInterface
+        public void requestIgnoreBatteryOptimization() {
+            if (!activity.bridgeAllowed()) return;
+            activity.openBatteryOptimizationSettings();
+        }
+
         // 通知发送统一走 MainActivity.postNotification（授权回调需访问）
         private void postNotification(String title, String body) {
             activity.postNotification(title, body);
@@ -829,6 +883,63 @@ public class MainActivity extends Activity {
     private void toastOnUiThread(String msg) {
         new Handler(Looper.getMainLooper()).post(
                 () -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show());
+    }
+
+    /**
+     * 系统是否已对本应用豁免电池优化（Doze 白名单）。
+     * API 23 以下没有该机制，直接视为已豁免。
+     */
+    private boolean checkBatteryOptimizationIgnored() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
+        try {
+            android.os.PowerManager pm =
+                    (android.os.PowerManager) getSystemService(POWER_SERVICE);
+            return pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
+        } catch (Exception e) {
+            // 部分定制 ROM 会抛 SecurityException：按「未豁免」处理，引导用户手动设置
+            return false;
+        }
+    }
+
+    /**
+     * 打开「忽略电池优化」申请对话框。
+     *
+     * 用 ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 直接弹系统授权框（需在
+     * manifest 声明 REQUEST_IGNORE_BATTERY_OPTIMIZATIONS）；国产 ROM 常拦截该 intent，
+     * 因此失败时逐级退到「电池优化列表」→「应用详情页」，让用户仍能手动操作。
+     */
+    private void openBatteryOptimizationSettings() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            toastOnUiThread("当前系统无需设置电池优化");
+            return;
+        }
+        // 1) 直接申请豁免
+        try {
+            Intent req = new Intent(
+                    android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            req.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(req);
+            return;
+        } catch (Exception ignored) {
+            /* 部分 ROM 不支持，继续降级 */
+        }
+        // 2) 电池优化列表
+        try {
+            startActivity(new Intent(
+                    android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+            return;
+        } catch (Exception ignored) {
+            /* 继续降级 */
+        }
+        // 3) 应用详情页
+        try {
+            Intent detail = new Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            detail.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(detail);
+        } catch (Exception e) {
+            toastOnUiThread("请在系统设置中手动将本应用设为「不受电池限制」");
+        }
     }
 
     /**

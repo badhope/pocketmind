@@ -2453,3 +2453,29 @@ body {
   color: var(--text-3);
   margin-top: 14px;
 }
+
+/* ---------- 后台保活引导（仅 Android 壳内显示） ---------- */
+.battery-guide {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, #d97706 40%, transparent);
+  background: color-mix(in srgb, #d97706 10%, transparent);
+}
+.battery-guide-text { flex: 1; min-width: 0; }
+.battery-guide-text strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.battery-guide-text p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+.battery-guide .btn { flex: 0 0 auto; }
