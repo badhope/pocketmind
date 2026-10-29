@@ -483,6 +483,25 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title=APP_NAME, version=VERSION, lifespan=lifespan)
 
+    # ---------- 请求体大小上限 ----------
+    # /api/import 会接收整份备份 JSON，/api/chat 会接收最长 100KB 的消息。
+    # 没有上限时，一个畸形请求（或恶意页面发起的同源请求）可以把内存打满。
+    # 20MB 足够容纳导出全部会话的备份，同时给内存一个明确边界。
+    MAX_BODY_BYTES = 20 * 1024 * 1024
+
+    @app.middleware("http")
+    async def _body_limit_mw(request, call_next):
+        cl = request.headers.get("content-length")
+        if cl is not None:
+            try:
+                if int(cl) > MAX_BODY_BYTES:
+                    from fastapi.responses import JSONResponse
+
+                    return JSONResponse({"detail": "请求体过大（上限 20MB）"}, status_code=413)
+            except ValueError:
+                pass
+        return await call_next(request)
+
     # ---------- 运行指标（请求耗时/状态码/工具失败率） ----------
     # 用中间件而非每个端点装饰器：端点有 43 个，逐个加会漏；
     # 且中间件能统计到 404/500 这类"没有走到端点"的响应。
