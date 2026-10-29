@@ -34,6 +34,8 @@ public class MonitorService extends Service {
     private static final String CHANNEL_ID = "pocket_agent";
     private static final int NOTIFICATION_ID = 20240601;
     private static final long POLL_INTERVAL_MS = 5000L;
+    /** 在线时的轮询间隔：保活探测不需要 5 秒一次，长期 5 秒会明显耗电。 */
+    private static final long POLL_INTERVAL_ALIVE_MS = 30000L;
     private static final int HEALTH_TIMEOUT_MS = 3000;
 
     /** 广播 action：状态切换时通知 MainActivity */
@@ -51,7 +53,9 @@ public class MonitorService extends Service {
             new Thread(() -> {
                 boolean alive = doHealthCheck();
                 mainHandler.post(() -> onHealthResult(alive));
-                mainHandler.postDelayed(this, POLL_INTERVAL_MS);
+                // 在线时拉长间隔省电；离线时保持 5 秒，尽快发现服务恢复。
+                // 之前恒定 5 秒轮询：一天 17280 次 HTTP 请求，锁屏也在跑。
+                mainHandler.postDelayed(this, alive ? POLL_INTERVAL_ALIVE_MS : POLL_INTERVAL_MS);
             }).start();
         }
     };
