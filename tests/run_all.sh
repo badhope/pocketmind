@@ -161,6 +161,8 @@ if [ "$RUN_BACKEND" = 1 ]; then
   step "p29 运行统计与 Token 用量（/api/stats 真数据）" run_py smoke/p29_stats_usage_test.py
   step "p30 置顶 / 立即执行 / 导入恢复" run_py smoke/p30_features_test.py
   step "p31 真实 OpenAI 兼容链路（流式 / 工具分片 / usage / 降级）" run_py smoke/p31_openai_compat_test.py
+  step "p32 Android 交付链（回环鉴权 / 时区 / 端口自检 / start.sh 参数）" run_py smoke/p32_android_delivery_test.py
+  step "版本一致性（main.py / package.json / gradle.properties）" run_py tests/check_version.py
   if [ "$WITH_DEP_AUDIT" = 1 ]; then
     step "p22 依赖漏洞扫描（OSV.dev，需外网）" run_py smoke/p22_dep_audit_test.py
   fi

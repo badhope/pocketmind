@@ -86,3 +86,56 @@ jobs:
 
       - name: Run E2E
         run: bash tests/run_all.sh --with-e2e
+
+  # Android APK：交付物必须由 CI 产出，而不是让用户自己装 Android Studio。
+  # 审计 2026-10-29 发现仓库从未发布过 APK、且干净克隆 ./gradlew 不可用（wrapper jar 被
+  # .gitignore 排除），这两个问题都让"能装到手机上"变成一句空话。
+  android:
+    name: Android APK (assembleDebug + lint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install platform + build-tools
+        run: |
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Lint (fails on errors)
+        working-directory: termux/apk-shell
+        run: ./gradlew lintDebug --no-daemon --stacktrace
+
+      - name: Assemble debug + release APK
+        working-directory: termux/apk-shell
+        run: ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace
+
+      - name: Verify APK (signature + alignment + manifest)
+        working-directory: termux/apk-shell
+        run: |
+          set -e
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -f "$APK"
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+          "$BT/apksigner" verify --print-certs "$APK"
+          "$BT/zipalign" -c -v 4 "$APK" >/dev/null
+          "$BT/aapt" dump badging "$APK" | head -5
+          # 版本号必须与后端一致（tests/check_version.py 已校验，这里再核 APK 内部值）
+          "$BT/aapt" dump badging "$APK" | grep -q "versionName='$(grep POCKET_VERSION_NAME gradle.properties | cut -d= -f2)'"
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocketmind-android-apk
+          path: |
+            termux/apk-shell/app/build/outputs/apk/debug/app-debug.apk
+            termux/apk-shell/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
