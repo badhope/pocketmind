@@ -82,6 +82,17 @@ android {
         targetCompatibility JavaVersion.VERSION_1_8
     }
 
+    testOptions {
+        // Robolectric 在 JVM 上模拟 Android 框架：这是本机唯一能跑 Activity 级
+        // 验证的通道（KVM 虚拟机没有嵌套虚拟化，AVD 起不来）。
+        unitTests {
+            includeAndroidResources = true
+            all {
+                maxHeapSize = "1g"
+            }
+        }
+    }
+
     lint {
         // 这些检查在本工程是硬门禁：lintDebug 失败即构建失败
         abortOnError true
@@ -90,8 +101,12 @@ android {
 
 dependencies {
     // 运行时零第三方依赖：原生 WebView 即可，不引 Capacitor/WebView 增强库。
-    // 测试依赖只在 JVM 单测用，不进 APK：
-    // 本机是无硬件虚拟化的 KVM 虚拟机（AVD 起不来），JVM 单测是唯一能真实执行
-    // Android 侧安全逻辑的通道。见 SecurityPolicyTest。
+    // 测试依赖只在 JVM 单测用，不进 APK。
     testImplementation "junit:junit:4.13.2"
+    // Robolectric：纯 JVM 模拟 Android 框架（Activity/Context/Intent），
+    // 版本 4.14 支持 SDK 35。用于 Activity 级行为验证（见 MainActivityRoboTest）。
+    testImplementation "org.robolectric:robolectric:4.14.1"
+    testAnnotationProcessor "com.google.auto.service:auto-service:1.1.1"
+    testCompileOnly "com.google.auto.service:auto-service-annotations:1.1.1"
+    testImplementation "androidx.test:core:1.6.1"
 }

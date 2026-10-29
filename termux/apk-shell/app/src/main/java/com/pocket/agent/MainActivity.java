@@ -836,8 +836,11 @@ public class MainActivity extends Activity {
             if (!activity.bridgeAllowed()) return "";
             String name = (fileName == null || fileName.trim().isEmpty())
                     ? "pocketmind-backup.json" : fileName.trim();
-            // 只取文件名部分，杜绝 ../ 之类路径穿越
-            name = name.replaceAll(".*[/\\\\]", "");
+            // 只取文件名部分，杜绝 ../ 之类路径穿越。
+            // 字符类必须把反斜杠放前并转义：[\\/]。原写法 [/\\] 中 \ 紧贴类尾，
+            // 正则引擎把它当类结束符 → PatternSyntaxException，
+            // 导出备份时必然崩溃（由 Robolectric 单测 saveTextFileRejectsPathTraversal 抓到）。
+            name = name.replaceAll("^.*[\\\\/]", "");
             if (!name.matches("[A-Za-z0-9._-]{1,80}")) name = "pocketmind-backup.json";
             return activity.writeTextToDownloads(name, content == null ? "" : content);
         }
@@ -880,7 +883,7 @@ public class MainActivity extends Activity {
         return SecurityPolicy.shellQuote(raw);
     }
 
-    private void toastOnUiThread(String msg) {
+    void toastOnUiThread(String msg) {
         new Handler(Looper.getMainLooper()).post(
                 () -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show());
     }
@@ -889,7 +892,7 @@ public class MainActivity extends Activity {
      * 系统是否已对本应用豁免电池优化（Doze 白名单）。
      * API 23 以下没有该机制，直接视为已豁免。
      */
-    private boolean checkBatteryOptimizationIgnored() {
+    boolean checkBatteryOptimizationIgnored() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
         try {
             android.os.PowerManager pm =
@@ -908,7 +911,7 @@ public class MainActivity extends Activity {
      * manifest 声明 REQUEST_IGNORE_BATTERY_OPTIMIZATIONS）；国产 ROM 常拦截该 intent，
      * 因此失败时逐级退到「电池优化列表」→「应用详情页」，让用户仍能手动操作。
      */
-    private void openBatteryOptimizationSettings() {
+    void openBatteryOptimizationSettings() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
             toastOnUiThread("当前系统无需设置电池优化");
             return;
@@ -949,7 +952,12 @@ public class MainActivity extends Activity {
      * Android 8/9 退到应用专属外部目录（getExternalFilesDir），同样无需权限。
      * 两者都不申请危险权限 —— 备份里含会话内容，能少一个权限就少一个。
      */
-    private String writeTextToDownloads(String fileName, String content) {
+    String writeTextToDownloads(String fileName, String content) {
+        // 纵深防御：桥层已清洗过文件名，但本方法是独立的写入口（未来可能被
+        // 分享/导出功能直接调用），必须自带防线。清洗后不合法就落到默认名。
+        String safe = fileName == null ? "" : fileName.replaceAll("^.*[\\\\/]", "");
+        if (!safe.matches("[A-Za-z0-9._-]{1,80}")) safe = "pocketmind-backup.json";
+        fileName = safe;
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 android.content.ContentValues cv = new android.content.ContentValues();
