@@ -737,12 +737,25 @@ public class MainActivity extends Activity {
      * 该文件在安装时 chmod 600，只有 Termux 自己可读 —— 因此由 Termux 打印。
      * 为避免同步阻塞 UI，实际调用点在后台线程，见 loadTokenAsync()。
      */
+    /**
+     * 读取 agentd 访问令牌（同步返回当前缓存）。
+     *
+     * 令牌是从 Termux 异步取回的（RUN_COMMAND 的结果只能经 PendingIntent 回传），
+     * 因此首次调用通常返回空串。这里在缓存为空时顺带触发一次拉取，
+     * 前端通过轮询/事件拿到后自动重试 —— 两边配合才不需要用户手抄令牌。
+     */
     private String readTokenFromTermux() {
+        if (tokenCache.isEmpty() && !tokenRequestInFlight) {
+            new Thread(this::requestTokenFromTermux).start();
+        }
         return tokenCache;
     }
 
-    /** 令牌缓存：由 Termux 在启动时通过 termux-notification / 文件写入后，壳主动拉取。 */
+    /** 令牌缓存：由 Termux 的 RUN_COMMAND 结果回填。 */
     private volatile String tokenCache = "";
+
+    /** 避免前端轮询时反复发起 RUN_COMMAND。 */
+    private volatile boolean tokenRequestInFlight = false;
 
     /**
      * 主动请求 Termux 输出令牌：执行 cat，结果通过 PendingIntent 回传。
@@ -766,8 +779,10 @@ public class MainActivity extends Activity {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) flags |= PendingIntent.FLAG_MUTABLE;
             PendingIntent pi = PendingIntent.getBroadcast(this, 1001, resultIntent, flags);
             intent.putExtra("RUN_COMMAND_SERVICE.EXTRA_PENDING_INTENT", pi);
+            tokenRequestInFlight = true;
             startService(intent);
         } catch (Exception e) {
+            tokenRequestInFlight = false;
             Log.d(TAG, "requestTokenFromTermux unavailable: " + e.getMessage());
         }
     }
@@ -781,6 +796,7 @@ public class MainActivity extends Activity {
         tokenReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context ctx, Intent intent) {
+                tokenRequestInFlight = false;
                 if (intent == null) return;
                 android.os.Bundle b = intent.getBundleExtra(
                         "TERMUX_SERVICE.EXTRA_PLUGIN_RESULT_BUNDLE");

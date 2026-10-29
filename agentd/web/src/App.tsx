@@ -119,6 +119,16 @@ export default function App() {
     void init();
   }, [init]);
 
+  // Android 壳异步取到令牌后会派发 pa-token-ready：此时必须重新初始化，
+  // 否则页面仍停留在"缺令牌"状态（首次同步读取必然是空串）。
+  useEffect(() => {
+    const onTokenReady = () => {
+      onTokenSubmitted();
+    };
+    window.addEventListener("pa-token-ready", onTokenReady);
+    return () => window.removeEventListener("pa-token-ready", onTokenReady);
+  }, [onTokenSubmitted]);
+
   // system 模式下跟随系统主题切换
   useEffect(() => {
     if (theme !== "system") return;
