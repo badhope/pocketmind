@@ -199,7 +199,22 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (web != null) web.onResume();
         pingOnResume();
+    }
+
+    /**
+     * onPause：把生命周期转发给 WebView。
+     *
+     * Cordova/Capacitor 的 Android 壳都做这一步。不转发时，App 退到后台
+     * WebView 仍继续跑 JS 定时器与媒体解码 —— SSE 长连接、健康轮询、
+     * 流式打字动画都在后台空转，是手机上非常明显的耗电与发热来源。
+     * 转发后 WebView 会暂停 JS 计时器，回到前台 onResume 自动恢复。
+     */
+    @Override
+    protected void onPause() {
+        if (web != null) web.onPause();
+        super.onPause();
     }
 
     private void pingOnResume() {
@@ -511,6 +526,18 @@ public class MainActivity extends Activity {
         // 早前在这里 stopService，导致用户一退出界面保活就没了，通知栏也跟着消失。
         // 服务自身由系统按 START_STICKY 管理，用户可在系统设置里停止本应用。
         if (web != null) {
+            // 先移除 JS 桥再 destroy：addJavascriptInterface 注入的对象会被
+            // WebView 的 native 层持有，直接 destroy 在 API 11+ 上存在已知的对象泄漏
+            // （Cordova 的 WebView 销毁流程同样先清桥）。
+            try {
+                web.removeJavascriptInterface("PocketNative");
+            } catch (Exception ignored) {
+                /* 旧版本或已移除 */
+            }
+            web.stopLoading();
+            web.setWebChromeClient(null);
+            web.setWebViewClient(null);
+            web.loadUrl("about:blank");
             web.destroy();
             web = null;
         }
