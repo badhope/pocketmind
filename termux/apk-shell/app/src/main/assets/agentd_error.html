@@ -50,16 +50,31 @@
   <div class="logo">袋</div>
   <h1>本地服务未启动</h1>
   <p>口袋智灵需要先在 Termux 中启动后端服务。</p>
-  <code id="cmd">bash ~/poketmind/termux/start.sh</code>
-  <button class="btn" id="retryBtn" onclick="doRetry()">启动完成后，点击重试</button>
+  <code id="cmd">bash ~/pocketmind/termux/start.sh</code>
+  <button class="btn" id="startBtn" onclick="doStart()">启动服务</button>
+  <button class="btn" style="background:#1f2937;margin-top:8px" onclick="doRetry()">启动完成后，点击重试</button>
   <button class="btn" style="background:#1f2937;margin-top:8px" onclick="copyCmd()">复制启动命令</button>
-  <button class="btn" style="background:#059669;margin-top:8px" onclick="launchTermux()">启动服务</button>
   <div class="status" id="statusText"></div>
 </div>
 <script>
+  function setStatus(t) {
+    document.getElementById('statusText').textContent = t;
+  }
+  function doStart() {
+    // 「启动服务」必须真的启动服务：调用原生 startAgent（执行 termux/start.sh），
+    // 而不是只把 Termux 拉到前台让用户自己敲命令。
+    if (window.PocketNative && window.PocketNative.startAgent) {
+      window.PocketNative.startAgent();
+      setStatus('已请求 Termux 启动服务，约 5-10 秒后就绪，请点「重试」');
+    } else if (window.PocketNative && window.PocketNative.launchTermux) {
+      window.PocketNative.launchTermux();
+      setStatus('已打开 Termux，请手动执行上面的命令');
+    } else {
+      setStatus('当前环境无法自动启动，请复制命令到 Termux 执行');
+    }
+  }
   function doRetry() {
-    document.getElementById('statusText').textContent = '正在尝试连接…';
-    // 通知原生层触发重载
+    setStatus('正在尝试连接…');
     if (window.PocketNative && window.PocketNative.reload) {
       window.PocketNative.reload();
     } else {
@@ -70,21 +85,13 @@
     var cmd = document.getElementById('cmd').textContent;
     if (window.PocketNative && window.PocketNative.copyText) {
       window.PocketNative.copyText(cmd);
-      document.getElementById('statusText').textContent = '已复制到剪贴板';
+      setStatus('已复制到剪贴板');
     } else if (navigator.clipboard) {
       navigator.clipboard.writeText(cmd).then(function() {
-        document.getElementById('statusText').textContent = '已复制到剪贴板';
+        setStatus('已复制到剪贴板');
       }).catch(function() {
-        document.getElementById('statusText').textContent = '复制失败，请手动选择文本';
+        setStatus('复制失败，请手动选择文本');
       });
-    }
-  }
-  function launchTermux() {
-    if (window.PocketNative && window.PocketNative.launchTermux) {
-      window.PocketNative.launchTermux();
-      document.getElementById('statusText').textContent = '正在唤醒 Termux…';
-    } else {
-      document.getElementById('statusText').textContent = '当前环境无法直接启动 Termux';
     }
   }
 </script>

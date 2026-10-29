@@ -97,7 +97,7 @@
     <div class="num">2</div>
     <div class="body">
       <div class="title">一键部署</div>
-      <div class="desc">点击「一键部署」会自动在 Termux 中安装依赖、克隆口袋智灵仓库并启动后端（约 3-8 分钟）。</div>
+      <div class="desc">点击「一键部署」会自动在 Termux 中安装依赖、克隆口袋智灵仓库并启动后端（首次请预留 10-30 分钟，主要耗在 pydantic-core 的 Rust 现场编译）。</div>
     </div>
   </div>
   <div class="step">
@@ -110,7 +110,7 @@
 
   <div class="field">
     <label>仓库地址（一般无需修改）</label>
-    <input type="text" id="repoUrl" value="https://github.com/X33834/pocketmind.git" />
+    <input type="text" id="repoUrl" value="" placeholder="https://github.com/X33834/pocketmind.git" />
   </div>
 
   <button class="btn green" id="deployBtn" onclick="doDeploy()">一键部署</button>
@@ -126,8 +126,17 @@
     document.getElementById('statusText').textContent = t;
   }
   function doDeploy() {
-    var url = document.getElementById('repoUrl').value.trim();
-    setStatus('已发送部署指令，请到 Termux 查看进度…');
+    var input = document.getElementById('repoUrl');
+    var url = (input.value || '').trim();
+    // 留空 = 用原生层注入的默认仓库地址（resValue repo_url，与 Java 同一份来源）
+    if (!url && window.PocketNative && window.PocketNative.getRepoUrl) {
+      url = window.PocketNative.getRepoUrl();
+    }
+    if (!url) {
+      setStatus('请填写仓库地址');
+      return;
+    }
+    setStatus('已发送部署指令，请到 Termux 查看进度（首次约 10-30 分钟）…');
     if (window.PocketNative && window.PocketNative.deployAgent) {
       window.PocketNative.deployAgent(url);
     } else {
