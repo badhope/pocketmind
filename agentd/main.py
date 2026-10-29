@@ -1484,6 +1484,34 @@ def create_app() -> FastAPI:
     return app
 
 
+def _is_android_runtime() -> bool:
+    """是否运行在 Android（Termux 或 APK 内嵌）上。
+
+    判定依据：
+      - 环境变量 PREFIX/HOME 指向 com.termux（Termux 标准形态）
+      - 或 sys.platform == "android"（Chaquopy 等内嵌 Python 的形态）
+      - 或 /system/build.prop 存在且含 ro.build.version.sdk（Android 内核）
+
+    用途：决定是否强制回环鉴权。Android 的 127.0.0.1 是全机共享命名空间，
+    与桌面「回环只有本用户可连」的安全假设完全不同，不能沿用同一默认值。
+    """
+    import sys as _sys
+
+    prefix = os.environ.get("PREFIX", "") + os.environ.get("HOME", "")
+    if "com.termux" in prefix:
+        return True
+    if _sys.platform == "android":
+        return True
+    try:
+        with open("/system/build.prop", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if line.startswith("ro.build.version.sdk="):
+                    return True
+    except OSError:
+        pass
+    return False
+
+
 def _rebuild_app_for_home() -> None:
     """--home 重定位：重建 approval 与 app，使 store/scheduler/checkpoints 跟随新数据目录。"""
     global approval, app, _scheduler
@@ -1555,6 +1583,26 @@ def main():
     if env_token and not str(settings_mgr.get().get("server", {}).get("token", "")).strip():
         settings_mgr.save({"server": {"token": env_token}})
         print("[agentd] 已从环境变量 AGENT_TOKEN 初始化访问令牌（后续以 config.json 为准）")
+
+    # Android/Termux：127.0.0.1 是**全机共享**的，不是"只有本进程能连"。
+    # 若不带令牌启动，同机任意 App（含恶意应用）都能读写会话、调用 shell 工具。
+    # 因此在这个平台上即使只监听回环也强制鉴权：
+    #   - 已有令牌：照常
+    #   - 没有令牌：自动生成一个随机令牌并落盘（600），用户无需输入；
+    #     壳从同一个文件读取并注入 WebView。
+    # 桌面/容器保持原行为（回环无需令牌），避免破坏本机开发与测试流程。
+    if _is_android_runtime() and not str(settings_mgr.get().get("server", {}).get("token", "")).strip():
+        import secrets as _secrets
+
+        _tok = _secrets.token_hex(32)
+        settings_mgr.save({"server": {"token": _tok}})
+        try:
+            _tf = settings_mgr.path.parent / "token"
+            _tf.write_text(_tok, encoding="utf-8")
+            os.chmod(_tf, 0o600)
+        except OSError:
+            pass
+        print("[agentd] 已在 Android 上自动生成访问令牌（127.0.0.1 全机共享，必须鉴权）")
 
     # MCP server 独立模式：直接走 stdio，不启动 FastAPI
     if args.mcp_server:
