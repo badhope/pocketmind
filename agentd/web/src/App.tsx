@@ -10,6 +10,7 @@ import { SessionList } from "./components/SessionList";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { TimerPanel } from "./components/TimerPanel";
 import { TodoPanel } from "./components/TodoPanel";
+import { TokenGate } from "./components/TokenGate";
 import { useAgentStore } from "./store/useAgentStore";
 import type { Msg } from "./types";
 import { applyTheme } from "./theme";
@@ -38,6 +39,8 @@ export default function App() {
   const settings = useAgentStore((s) => s.settings);
   const webSearch = useAgentStore((s) => s.webSearch);
   const setWebSearch = useAgentStore((s) => s.setWebSearch);
+  const needToken = useAgentStore((s) => s.needToken);
+  const onTokenSubmitted = useAgentStore((s) => s.onTokenSubmitted);
 
   // 审批倒计时跟随后端配置（server.approval_timeout），拿不到时兜底 120s
   // 「编辑消息」回填输入框的草稿：非空时 Composer 会消费并回调清空
@@ -133,6 +136,12 @@ export default function App() {
     if (!el) return;
     if (!pinnedUp) el.scrollTop = el.scrollHeight;
   }, [messages, pinnedUp]);
+
+  // 缺令牌时先解决鉴权，再渲染主界面：否则所有请求都是 401，
+  // 用户只会看到"正在连接"和一堆失败提示，却没有输入入口。
+  if (needToken) {
+    return <TokenGate onDone={onTokenSubmitted} />;
+  }
 
   return (
     <div className="app">

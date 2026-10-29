@@ -12,6 +12,20 @@ interface PocketNativeBridge {
   copyText?: (text: string) => void;
   /** 触发页面重载 */
   reload?: () => void;
+  /** 发一条系统通知（Android 13+ 首次调用会申请权限） */
+  notify?: (title: string, body: string) => void;
+  /** 从 Termux 读取 agentd 访问令牌；读不到返回空串 */
+  readToken?: () => string;
+  /** 默认部署仓库地址（由原生 resValue 注入，与 Java 同源） */
+  getRepoUrl?: () => string;
+  /** 一键部署：在 Termux 中装依赖、克隆仓库、安装并启动 agentd */
+  deployAgent?: (repoUrl: string) => void;
+  /** 仅启动已部署的 agentd */
+  startAgent?: () => void;
+  /** 重新执行健康检查 */
+  checkAgain?: () => void;
+  /** 打开 Termux 的 F-Droid 下载页 */
+  openFdroid?: () => void;
 }
 
 declare global {
@@ -24,9 +38,14 @@ function getBridge(): PocketNativeBridge | null {
   return typeof window !== "undefined" ? window.PocketNative ?? null : null;
 }
 
+/** 是否运行在 Android WebView 壳内（决定是否显示"部署/启动服务"类按钮）。 */
+export function isNativeShell(): boolean {
+  return getBridge() !== null;
+}
+
 /**
  * 振动反馈（Android 原生）。
- * @param ms 振动时长（毫秒），默认 30
+ * @param ms 振动时长，默认 30
  */
 export function vibrate(ms = 30): void {
   try {
@@ -61,9 +80,7 @@ export async function copyText(text: string): Promise<boolean> {
   return false;
 }
 
-/**
- * 触发页面重载（WebView 走原生 reload 以保留 WebView 状态；浏览器走 location.reload）。
- */
+/** 触发页面重载（WebView 走原生 reload 以保留 WebView 状态；浏览器走 location.reload）。 */
 export function reloadPage(): void {
   const bridge = getBridge();
   if (bridge?.reload) {
@@ -76,5 +93,76 @@ export function reloadPage(): void {
   }
   if (typeof window !== "undefined") {
     window.location.reload();
+  }
+}
+
+/** 系统通知（仅 WebView 壳内可用；浏览器内 no-op）。 */
+export function notify(title: string, body: string): void {
+  try {
+    getBridge()?.notify?.(title, body);
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/**
+ * 从 Termux 读取访问令牌。
+ *
+ * 为什么需要：Android 上 127.0.0.1 是全机共享的，agentd 必须带令牌启动；
+ * 令牌由 install.sh 随机生成并写进手机本地文件，壳通过 Termux 读出来交给 WebView，
+ * 用户不必手抄一串 64 位十六进制。
+ *
+ * @returns 令牌字符串；非壳环境或读取失败时返回 ""
+ */
+export function readNativeToken(): string {
+  try {
+    return getBridge()?.readToken?.() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** 默认部署仓库地址（壳内可用；浏览器返回 ""）。 */
+export function getNativeRepoUrl(): string {
+  try {
+    return getBridge()?.getRepoUrl?.() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** 一键部署（仅壳内）。返回是否已交给原生层。 */
+export function deployAgent(repoUrl: string): boolean {
+  const bridge = getBridge();
+  if (!bridge?.deployAgent) return false;
+  try {
+    bridge.deployAgent(repoUrl);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 仅启动已部署的 agentd（仅壳内）。 */
+export function startAgent(): boolean {
+  const bridge = getBridge();
+  if (!bridge?.startAgent) return false;
+  try {
+    bridge.startAgent();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 重新执行健康检查（仅壳内）。 */
+export function checkAgain(): boolean {
+  const bridge = getBridge();
+  if (!bridge?.checkAgain) return false;
+  try {
+    bridge.checkAgain();
+    return true;
+  } catch {
+    return false;
   }
 }

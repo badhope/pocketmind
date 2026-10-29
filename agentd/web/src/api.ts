@@ -13,6 +13,23 @@ export function setToken(token: string) {
   else localStorage.removeItem(TOKEN_KEY);
 }
 
+/**
+ * 从 Android 壳读取本机令牌并落盘（仅壳内有效）。
+ *
+ * 为什么需要：agentd 在 Android 上必须带令牌启动（127.0.0.1 是全机共享的，
+ * 否则同机任意 App 都能读会话/执行工具）。令牌由 install.sh 随机生成，
+ * 壳通过 Termux 读出来 —— 用户不必手抄，也不会因为忘记令牌而锁死自己。
+ *
+ * 只在本地还没有令牌时写入，避免覆盖用户在设置面板里手动填的值。
+ */
+export function adoptNativeToken(raw: string): boolean {
+  const t = (raw || "").trim();
+  if (!t) return false;
+  if (getToken()) return false;
+  setToken(t);
+  return true;
+}
+
 function headers(extra?: Record<string, string>): Record<string, string> {
   const h: Record<string, string> = { ...extra };
   const t = getToken();

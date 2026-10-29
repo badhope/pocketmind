@@ -18,5 +18,9 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    // Android WebView 的版本跟随系统 Chrome，老机型（Android 8/9 出厂机、
+    // 长期未更新 WebView 的设备）解析不了 ES2020 的 ?. 与 ??。
+    // 目标降到 es2017，由 esbuild 降级语法；运行时 API 不在这里处理。
+    target: "es2017",
   },
 });

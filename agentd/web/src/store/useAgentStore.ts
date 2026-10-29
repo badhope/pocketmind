@@ -14,6 +14,7 @@ import {
   exportAll,
   getPendingApprovals,
   getTodos,
+  isUnauthorized,
   pinSession,
   renameSession,
   undoToolCall,
@@ -99,6 +100,16 @@ export interface AgentStore {
   clearError: () => void;
   // 后端连接状态：connected 正常 / disconnected 断连 / reconnecting 重连中
   connectionStatus: ConnectionStatus;
+  /**
+   * 后端要求访问令牌（HTTP 401）时为 true，首屏显示令牌输入层。
+   *
+   * 为什么放进 store：401 可能出现在任意请求上（健康检查、会话列表、SSE）。
+   * 若每个调用点各自处理，用户会看到一堆"请求失败"；统一在这里置位一次，
+   * 界面只呈现一个明确的解决入口。
+   */
+  needToken: boolean;
+  /** 令牌输入完成：清标记并重建连接。 */
+  onTokenSubmitted: () => void;
   // 浮层开关
   showSessions: boolean;
   showSettings: boolean;
@@ -268,6 +279,12 @@ const _storeCreator: StateCreator<AgentStore, [], []> = (set, get) => {
     settings: null as Record<string, unknown> | null,
     // 连接状态：初始为 reconnecting，首次健康检查后确定
     connectionStatus: "reconnecting" as ConnectionStatus,
+    needToken: false,
+
+    onTokenSubmitted() {
+      set({ needToken: false, connectionStatus: "reconnecting" });
+      void get().init();
+    },
 
     // ---------- 健康检查轮询（指数退避） ----------
     startHealthPolling() {
@@ -337,7 +354,13 @@ const _storeCreator: StateCreator<AgentStore, [], []> = (set, get) => {
       try {
         const h = await api.get<{ ok: boolean; ready: boolean; mock: boolean }>("/api/health");
         set({ ready: h.ready, mock: h.mock, connectionStatus: "connected" });
-      } catch {
+      } catch (e) {
+        // 401 不是"后端挂了"，而是"缺令牌"：必须给出输入入口，否则用户只能看到
+        // 一直转圈的"正在连接"，永远不知道该做什么。
+        if (isUnauthorized(e)) {
+          set({ ready: false, needToken: true, connectionStatus: "connected" });
+          return;
+        }
         set({ ready: false, connectionStatus: "disconnected" });
       }
       // 启动持续健康检查轮询（在后台持续检测后端是否恢复）
