@@ -162,7 +162,7 @@ bash termux/start.sh            # default http://127.0.0.1:8787
 #    ⚙ Settings (top-right): pick a provider → enter API Key → save → chat
 ```
 
-> Access from other devices on the same Wi-Fi: `bash termux/start.sh 8787 --lan` (set an access token in Settings first — required).
+> Access from other devices on the same Wi-Fi: `bash termux/start.sh --lan` (a token is generated on first run; the page asks for it).
 
 ### Option B: Local development / try it out (no phone needed)
 

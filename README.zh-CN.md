@@ -151,14 +151,19 @@ pkg install git python termux-api
 git clone <本仓库地址> && cd pocketmind
 bash termux/install.sh          # 装 Python/编译工具链 + 依赖 + 数据目录（pydantic-core 首次需 Rust 现场编译，真机约 10-30 分钟；模拟器实测约 50 分钟）
 
-# 2. 启动服务
+# 2. 启动服务（首次会自动生成访问令牌并注入）
 bash termux/start.sh            # 默认 http://127.0.0.1:8787
 
 # 3. 浏览器打开 http://127.0.0.1:8787
-#    右上角 ⚙ 设置：选模型厂商 → 填 API Key → 保存 → 开聊
+#    页面会要求访问令牌：cat ~/.agent/termux-agent/token 粘贴进去
+#    然后右上角 ⚙ 设置：选模型厂商 → 填 API Key → 保存 → 开聊
 ```
 
-> 手机浏览器访问同一 WiFi 下的服务：`bash termux/start.sh 8787 --lan`（务必先在设置里配置访问令牌）。
+> **为什么必须令牌**：Android 上 `127.0.0.1` 是全机共享命名空间，任何 App 都能连这个端口。
+> 不鉴权等于把会话、文件与 shell 交给同机任意应用。APK 壳会自动从 Termux 读取令牌，
+> 用浏览器时只需粘贴一次。
+
+> 其它设备访问同一 WiFi 下的服务：`bash termux/start.sh --lan`（先用上面的令牌登录，再在设置里改为固定令牌）。
 
 ### 方案 B：本机开发 / 体验（不需要手机）
 
