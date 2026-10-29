@@ -78,6 +78,9 @@
 *.war
 *.ear
 **/.gradle/
+# Gradle Wrapper 必须入库：没有 jar 时 ./gradlew 直接 ClassNotFoundException，
+# 干净克隆无法构建 APK（曾被 *.jar 一刀切掉，见 2026-10-29 审计 A2）。
+!**/gradle/wrapper/gradle-wrapper.jar
 
 # C/C++/Go/Rust
 *.o

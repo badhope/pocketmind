@@ -3,6 +3,24 @@ plugins {
     id 'com.android.application'
 }
 
+// 版本号从 gradle.properties 读取（单源，见 tests/check_version.py）。
+// 缺失时给出可读的错误，而不是悄悄用 1.0.0 构建出一个无法辨认的包。
+def versionNameValue = project.findProperty("POCKET_VERSION_NAME")
+def versionCodeValue = project.findProperty("POCKET_VERSION_CODE")
+if (!versionNameValue || !versionCodeValue) {
+    throw new GradleException("缺少 POCKET_VERSION_NAME / POCKET_VERSION_CODE（应在 gradle.properties 中定义）")
+}
+
+// 发布签名：可选的 keystore.properties（不入库）。
+// 没有它时 release 构建产出 unsigned APK —— 显式命名，避免把未签名包当成品分发。
+def keystorePropsFile = rootProject.file("keystore.properties")
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+def hasReleaseKeystore = keystoreProps["storeFile"] &&
+        rootProject.file(keystoreProps["storeFile"] as String).exists()
+
 android {
     namespace 'com.pocket.agent'
     compileSdk 35
@@ -11,13 +29,26 @@ android {
         applicationId "com.pocket.agent"
         minSdk 26
         targetSdk 35
-        versionCode 1
-        versionName "1.0.0"
+        versionCode versionCodeValue as Integer
+        versionName versionNameValue
 
         // 本机 agentd 服务端口——改这里即可切换，不需动 Java
         buildConfigField "int", "AGENTD_PORT", "8787"
         resValue "string", "agentd_host", "127.0.0.1"
         resValue "string", "agentd_protocol", "http"
+        // 一键部署的默认仓库地址：只在这里改，Java 与引导页都读同一个值
+        resValue "string", "repo_url", "https://github.com/X33834/pocketmind.git"
+    }
+
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            release {
+                storeFile rootProject.file(keystoreProps["storeFile"] as String)
+                storePassword keystoreProps["storePassword"] as String
+                keyAlias keystoreProps["keyAlias"] as String
+                keyPassword keystoreProps["keyPassword"] as String
+            }
+        }
     }
 
     buildTypes {
@@ -27,6 +58,18 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasReleaseKeystore) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    // release 未配置签名时，产物名明确写 unsigned，避免误当可安装包分发
+    applicationVariants.all { variant ->
+        if (variant.buildType.name == "release" && !hasReleaseKeystore) {
+            variant.outputs.all { output ->
+                outputFileName = "pocketmind-shell-release-unsigned.apk"
+            }
         }
     }
 
@@ -37,6 +80,11 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    lint {
+        // 这些检查在本工程是硬门禁：lintDebug 失败即构建失败
+        abortOnError true
     }
 }
 

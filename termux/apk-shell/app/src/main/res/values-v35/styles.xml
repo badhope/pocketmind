@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      targetSdk 35 在 Android 15+ 强制 edge-to-edge：WebView 内容会顶到状态栏/导航栏下面，
+      聊天输入框可能被系统栏遮住。这里显式退出强制 edge-to-edge，保持壳的行为可预测。
+    -->
+    <style name="AppTheme" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0f1115</item>
+        <item name="android:statusBarColor">#0f1115</item>
+        <item name="android:navigationBarColor">#0f1115</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
+    </style>
+</resources>

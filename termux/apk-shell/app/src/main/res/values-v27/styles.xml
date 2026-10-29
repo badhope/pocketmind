@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      windowLayoutInDisplayCutoutMode 是 API 27 才有的属性。
+      写在 values/ 里会让 minSdk 26 的设备在填充主题时读不到该属性（lint NewApi），
+      因此按版本目录分开：26 用基础主题，27+ 才加刘海屏适配。
+    -->
+    <style name="AppTheme" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0f1115</item>
+        <item name="android:statusBarColor">#0f1115</item>
+        <item name="android:navigationBarColor">#0f1115</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>
