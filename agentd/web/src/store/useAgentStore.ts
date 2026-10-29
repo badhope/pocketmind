@@ -25,7 +25,7 @@ import {
   type StoredMessage,
   type TodoItem,
 } from "../api";
-import { vibrate } from "../native";
+import { saveTextFile, vibrate } from "../native";
 import { getThemePref, setThemePref, type ThemePref } from "../theme";
 import { uid, type Msg, type Part } from "../types";
 import { applyEvent, restore } from "./partReducer";
@@ -663,11 +663,23 @@ const _storeCreator: StateCreator<AgentStore, [], []> = (set, get) => {
     async onExport() {
       try {
         const data = await exportAll();
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+        const json = JSON.stringify(data, null, 2);
+        const fileName = `pocket-agent-backup-${new Date().toISOString().slice(0, 10)}.json`;
+
+        // Android 壳：blob + <a download> 在 WebView 里不会触发下载
+        // （DownloadListener 收不到 blob: URL），必须走原生保存。
+        const saved = saveTextFile(fileName, json);
+        if (saved) {
+          set({ error: "" });
+          return;
+        }
+
+        // 浏览器：照常走下载
+        const blob = new Blob([json], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `pocket-agent-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        a.download = fileName;
         a.click();
         URL.revokeObjectURL(url);
       } catch (e) {

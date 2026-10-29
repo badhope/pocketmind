@@ -42,6 +42,7 @@ import android.util.Log;
 import android.view.KeyEvent;
 import android.webkit.ConsoleMessage;
 import android.webkit.SslErrorHandler;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -54,9 +55,7 @@ import android.widget.Toast;
 
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.security.SecureRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.regex.Pattern;
 
 public class MainActivity extends Activity {
 
@@ -261,22 +260,10 @@ public class MainActivity extends Activity {
 
     /**
      * 允许在 WebView 里加载的页面白名单：只限本机 agentd 与内置 assets。
-     *
-     * 为什么必须白名单：WebView 注入了 PocketNative 桥（可执行 Termux 命令），
-     * 若允许任意导航，一个外部页面就能调用桥。这里的判定是「页面 URL 必须来自
-     * 127.0.0.1 / localhost 的本机服务，或内置 file:///android_asset」。
+     * 判定逻辑在 SecurityPolicy 里（纯 Java，可用 JVM 单测真实执行）。
      */
     private boolean isTrustedUrl(String url) {
-        if (url == null) return false;
-        Uri u = Uri.parse(url);
-        String scheme = u.getScheme() == null ? "" : u.getScheme().toLowerCase();
-        if ("file".equals(scheme)) {
-            // 只允许 APK 自带页面；file:// 指向任意本地文件一律拒绝
-            return url.startsWith("file:///android_asset/");
-        }
-        if (!"http".equals(scheme) && !"https".equals(scheme)) return false;
-        String host = u.getHost() == null ? "" : u.getHost().toLowerCase();
-        return "127.0.0.1".equals(host) || "localhost".equals(host);
+        return SecurityPolicy.isTrustedUrl(url);
     }
 
     private class PocketWebViewClient extends WebViewClient {
@@ -341,7 +328,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ════ WebChromeClient：标题 + console ════
+    // ════ WebChromeClient：标题 + console + 文件选择 ════
     private class PocketChromeClient extends WebChromeClient {
         @Override
         public boolean onConsoleMessage(ConsoleMessage msg) {
@@ -355,6 +342,79 @@ public class MainActivity extends Activity {
             pageTitle = title;
             Log.d(TAG, "Page title: " + title);
         }
+
+        /**
+         * WebView 里 &lt;input type="file"&gt; 的支持。
+         *
+         * 为什么必须有：设置面板的「导入备份」用一个动态创建的 file input 选 JSON；
+         * WebView 默认不实现 onShowFileChooser，点了没有任何反应 —— 用户看到的是
+         * "按钮没反应"，而导入是换机/重装恢复数据的唯一入口（审计 D1）。
+         * 实现方式与 Capacitor / Cordova 的 Android WebView 壳一致：
+         * 收下回调 → 拉起系统文件选择器 → onActivityResult 回填。
+         */
+        @Override
+        public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback,
+                                         FileChooserParams params) {
+            if (!bridgeAllowed()) return false;
+            if (pendingFileCallback != null) {
+                pendingFileCallback.onReceiveValue(null);
+            }
+            pendingFileCallback = callback;
+            try {
+                Intent pick = new Intent(Intent.ACTION_GET_CONTENT);
+                pick.addCategory(Intent.CATEGORY_OPENABLE);
+                // 导入只接受 JSON；按 params 的 acceptTypes 收紧，空则用 json
+                String[] accept = params != null ? params.getAcceptTypes() : null;
+                String type = "*/*";
+                if (accept != null) {
+                    for (String a : accept) {
+                        if (a != null && !a.trim().isEmpty()) {
+                            // "application/json,.json" 这类值取第一个 MIME
+                            type = a.split(",")[0].trim();
+                            break;
+                        }
+                    }
+                }
+                pick.setType(type.isEmpty() ? "*/*" : type);
+                startActivityForResult(Intent.createChooser(pick, "选择备份文件"),
+                        REQUEST_PICK_FILE);
+                return true;
+            } catch (Exception e) {
+                Log.w(TAG, "file chooser failed: " + e.getMessage());
+                pendingFileCallback = null;
+                Toast.makeText(MainActivity.this, "无法打开文件选择器", Toast.LENGTH_SHORT).show();
+                return false;
+            }
+        }
+    }
+
+    private static final int REQUEST_PICK_FILE = 2001;
+    /** 等待系统文件选择器返回的 WebView 回调（同一时刻只允许一个）。 */
+    private ValueCallback<Uri[]> pendingFileCallback;
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode != REQUEST_PICK_FILE) {
+            super.onActivityResult(requestCode, resultCode, data);
+            return;
+        }
+        ValueCallback<Uri[]> cb = pendingFileCallback;
+        pendingFileCallback = null;
+        if (cb == null) return;
+        Uri[] result = null;
+        if (resultCode == RESULT_OK && data != null) {
+            Uri single = data.getData();
+            if (single != null) {
+                result = new Uri[]{single};
+            } else if (data.getClipData() != null) {
+                int n = data.getClipData().getItemCount();
+                result = new Uri[n];
+                for (int i = 0; i < n; i++) {
+                    result[i] = data.getClipData().getItemAt(i).getUri();
+                }
+            }
+        }
+        cb.onReceiveValue(result);
     }
 
     private void showSetupPage() {
@@ -700,32 +760,93 @@ public class MainActivity extends Activity {
             return activity.getString(R.string.repo_url);
         }
 
+        /**
+         * 把文本内容保存成文件（备份导出用）。
+         *
+         * 为什么需要：前端导出走的是 `new Blob()` + `<a download>`，这在浏览器里能用，
+         * 但在 WebView 里**不会触发任何下载** —— blob: 既不走 DownloadListener，
+         * 也没有系统下载器接管。用户点「导出备份」只会看到什么都没发生（审计 D2）。
+         *
+         * 这里改走原生保存：
+         *   - Android 10+ 用 MediaStore 写进「下载」目录（无需存储权限）；
+         *   - 更低版本写到应用专属外部目录（同样无需权限）。
+         * 返回保存后的可读路径，前端用它提示用户。
+         */
+        @android.webkit.JavascriptInterface
+        public String saveTextFile(String fileName, String content) {
+            if (!activity.bridgeAllowed()) return "";
+            String name = (fileName == null || fileName.trim().isEmpty())
+                    ? "pocketmind-backup.json" : fileName.trim();
+            // 只取文件名部分，杜绝 ../ 之类路径穿越
+            name = name.replaceAll(".*[/\\\\]", "");
+            if (!name.matches("[A-Za-z0-9._-]{1,80}")) name = "pocketmind-backup.json";
+            return activity.writeTextToDownloads(name, content == null ? "" : content);
+        }
+
         // 通知发送统一走 MainActivity.postNotification（授权回调需访问）
         private void postNotification(String title, String body) {
             activity.postNotification(title, body);
         }
     }
 
-    /** 只允许 http(s) 的 git URL：禁止空白、引号、分号、管道、反引号、$ 等 shell 元字符。 */
-    private static final Pattern SAFE_REPO_URL =
-            Pattern.compile("^https?://[A-Za-z0-9._~:/?#\\[\\]@!&'()*+,=%-]+$");
-
+    /** 仓库地址校验与 shell 转义：实现见 SecurityPolicy（JVM 可单测）。 */
     private static boolean isSafeRepoUrl(String url) {
-        if (url == null || url.length() > 500) return false;
-        if (!SAFE_REPO_URL.matcher(url).matches()) return false;
-        // 上面字符集里仍允许 () 与 &，但它们出现在 shell 里是元字符：
-        // 用单引号包裹后这些都安全，因此这里只需再排除单引号（字符集已排除）。
-        return !url.contains("\n") && !url.contains("\r");
+        return SecurityPolicy.isSafeRepoUrl(url);
     }
 
-    /** POSIX 单引号转义：' → '\'' ，保证整个字符串被当成一个字面量。 */
+    /** POSIX 单引号转义：委托 SecurityPolicy，保证整个字符串被当成一个字面量。 */
     private static String shellQuote(String raw) {
-        return "'" + raw.replace("'", "'\\''") + "'";
+        return SecurityPolicy.shellQuote(raw);
     }
 
     private void toastOnUiThread(String msg) {
         new Handler(Looper.getMainLooper()).post(
                 () -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show());
+    }
+
+    /**
+     * 把文本写到「下载」目录，返回可展示的路径（失败返回空串）。
+     *
+     * Android 10+ 通过 MediaStore.Downloads 写入，不需要 WRITE_EXTERNAL_STORAGE；
+     * Android 8/9 退到应用专属外部目录（getExternalFilesDir），同样无需权限。
+     * 两者都不申请危险权限 —— 备份里含会话内容，能少一个权限就少一个。
+     */
+    private String writeTextToDownloads(String fileName, String content) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                android.content.ContentValues cv = new android.content.ContentValues();
+                cv.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+                cv.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/json");
+                cv.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_DOWNLOADS);
+                Uri uri = getContentResolver().insert(
+                        android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+                if (uri == null) return "";
+                try (java.io.OutputStream os = getContentResolver().openOutputStream(uri)) {
+                    if (os == null) return "";
+                    os.write(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    os.flush();
+                }
+                // 让文件管理器/下载应用立即看到它
+                sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, uri));
+                String shown = "下载/" + fileName;
+                toastOnUiThread("已保存到 " + shown);
+                return shown;
+            }
+            java.io.File dir = getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS);
+            if (dir == null) dir = getFilesDir();
+            if (!dir.exists() && !dir.mkdirs()) return "";
+            java.io.File out = new java.io.File(dir, fileName);
+            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(out)) {
+                fos.write(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+            toastOnUiThread("已保存到 " + out.getAbsolutePath());
+            return out.getAbsolutePath();
+        } catch (Exception e) {
+            Log.w(TAG, "saveTextFile failed: " + e.getMessage());
+            toastOnUiThread("保存失败：" + e.getMessage());
+            return "";
+        }
     }
 
     /**

@@ -89,5 +89,9 @@ android {
 }
 
 dependencies {
-    // 零第三方依赖：原生 WebView 即可，不引 Capacitor/WebView 增强库
+    // 运行时零第三方依赖：原生 WebView 即可，不引 Capacitor/WebView 增强库。
+    // 测试依赖只在 JVM 单测用，不进 APK：
+    // 本机是无硬件虚拟化的 KVM 虚拟机（AVD 起不来），JVM 单测是唯一能真实执行
+    // Android 侧安全逻辑的通道。见 SecurityPolicyTest。
+    testImplementation "junit:junit:4.13.2"
 }

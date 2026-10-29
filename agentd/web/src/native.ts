@@ -26,6 +26,8 @@ interface PocketNativeBridge {
   checkAgain?: () => void;
   /** 打开 Termux 的 F-Droid 下载页 */
   openFdroid?: () => void;
+  /** 把文本保存为文件（WebView 里 <a download> 不生效，走原生保存）；返回保存路径 */
+  saveTextFile?: (fileName: string, content: string) => string;
 }
 
 declare global {
@@ -164,5 +166,24 @@ export function checkAgain(): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * 保存文本为文件。
+ *
+ * WebView 里 `<a download>` + blob: 不会触发任何下载（DownloadListener 收不到 blob），
+ * 所以导出备份必须走原生保存。非壳环境返回 null，调用方应回退到浏览器下载。
+ *
+ * @returns 保存后的可读路径；非壳环境或失败返回 null
+ */
+export function saveTextFile(fileName: string, content: string): string | null {
+  const bridge = getBridge();
+  if (!bridge?.saveTextFile) return null;
+  try {
+    const path = bridge.saveTextFile(fileName, content);
+    return path && path.length > 0 ? path : null;
+  } catch {
+    return null;
   }
 }
