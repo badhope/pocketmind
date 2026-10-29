@@ -15,10 +15,12 @@
     <!-- 一键部署/启动服务：调用 Termux 的 RunCommandService 需要此权限 -->
     <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
 
-    <!-- Android 14+ 前台服务（special_use） -->
+    <!-- Android 14+ 前台服务（special_use）；Android 13 前台服务使用 dataSync -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"
         tools:targetApi="34" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"
+        tools:targetApi="34" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"
         tools:targetApi="34" />
 
     <!-- Android 11+ 包可见性：允许查询 Termux 是否已安装 -->
@@ -26,11 +28,18 @@
         <package android:name="com.termux" />
     </queries>
 
+    <!--
+      allowBackup=false：本应用持有局域网访问令牌（存在 WebView localStorage），
+      Android 默认的自动备份会把它同步到云端，与「数据只留在设备上」的承诺冲突。
+      usesCleartextTraffic=false：明文只由 network_security_config 对 127.0.0.1 放行。
+    -->
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:networkSecurityConfig="@xml/network_security_config"
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false"
         android:theme="@style/AppTheme"
         android:supportsRtl="true">
 
@@ -46,11 +55,16 @@
             </intent-filter>
         </activity>
 
-        <!-- 口袋智灵守护服务 -->
+        <!--
+          口袋智灵守护服务：
+          - API 34+ 用 specialUse，API 33 用 dataSync。
+          - 运行时传的 foregroundServiceType 必须是 manifest 声明的子集，
+            否则 startForeground 抛 IllegalArgumentException（API 33 上会直接崩）。
+        -->
         <service
             android:name=".MonitorService"
             android:exported="false"
-            android:foregroundServiceType="specialUse"
+            android:foregroundServiceType="specialUse|dataSync"
             tools:targetApi="34">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
