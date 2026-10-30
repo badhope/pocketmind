@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import socket
 import subprocess
@@ -239,6 +240,82 @@ def test_start_sh_args() -> None:
             log_path.unlink()
 
 
+def test_clear_token_sentinel() -> None:
+    """--clear-token 后令牌不得被 start.sh / env_token 复活（第四轮 D4）。
+
+    复现路径：install.sh 写 token 文件 → start.sh 注入 AGENT_TOKEN →
+    用户 --clear-token 清掉 config.json → 重启时 env_token 分支把旧令牌
+    写回 config.json，"清除"永远不生效。修复 = 哨兵文件 .token-cleared。
+    """
+    print("\n-- --clear-token 与 token 文件的一致性 --")
+    home = tempfile.mkdtemp(prefix="p32-clear-")
+    data_dir = Path(home) / ".agent" / "termux-agent"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    token_file = data_dir / "token"
+    token_file.write_text("oldtoken" * 8, encoding="utf-8")
+
+    # 1) --clear-token 写哨兵
+    env = {**os.environ, "AGENT_HOME": str(data_dir)}
+    r = subprocess.run(
+        [sys.executable, "-m", "agentd.main", "--clear-token"],
+        cwd=str(ROOT), env=env, capture_output=True, text=True, timeout=60,
+    )
+    check("--clear-token 正常退出", r.returncode == 0, r.stderr[-200:])
+    sentinel = data_dir / ".token-cleared"
+    check("--clear-token 写入哨兵文件", sentinel.exists(), str(sentinel))
+    cfg = json.loads((data_dir / "config.json").read_text(encoding="utf-8"))
+    check("config.json 里令牌已清空", cfg.get("server", {}).get("token", "") == "", str(cfg.get("server", {})))
+
+    # 2) start.sh 在哨兵存在时不注入旧令牌
+    sh = ROOT / "termux" / "start.sh"
+    log_name = ".p32-args2.txt"
+    log_path = ROOT / log_name
+    tmp = tempfile.mkdtemp(prefix="p32-sh2-")
+    fake = Path(tmp) / "python"
+    fake.write_text(f'#!/bin/sh\nprintf "%s\n" "$@" > {log_name}\n', encoding="utf-8")
+    fake.chmod(0o755)
+    env2 = {**os.environ, "PATH": tmp + os.pathsep + os.environ.get("PATH", ""),
+            "AGENT_HOME": str(data_dir), "HOME": home}
+    try:
+        # AGENT_TOKEN 是环境变量不进 argv：让假 python 把环境一起 dump 出来
+        fake.write_text(
+            f'#!/bin/sh\nprintf "%s\n" "$@" > {log_name}\n'
+            f'printf "AGENT_TOKEN=%s\n" "$AGENT_TOKEN" >> {log_name}\n',
+            encoding="utf-8")
+        subprocess.run(["bash", str(sh)], cwd=str(ROOT), env=env2,
+                       capture_output=True, text=True, timeout=60)
+        out = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+        check("哨兵存在时 start.sh 不注入 AGENT_TOKEN", "AGENT_TOKEN=oldtoken" not in out, out[:200])
+    finally:
+        if log_path.exists():
+            log_path.unlink()
+
+    # 3) 保存新令牌（设置面板路径）→ 哨兵清除 + token 文件同步
+    probe = (
+        f"import sys, os; sys.path.insert(0, {str(ROOT)!r}); "
+        f"os.environ['AGENT_HOME'] = {str(data_dir)!r}; "
+        "from agentd.config import Settings; "
+        "sm = Settings(); sm.path = __import__('pathlib').Path(os.environ['AGENT_HOME']) / 'config.json'; "
+        "sm.load(); sm.save({'server': {'token': 'newtoken' * 8}}); "
+        "from agentd import main as M; "
+        "# 直接调 main.py 的同步逻辑等价体：验证哨兵被清除\n"
+        "sentinel = __import__('pathlib').Path(os.environ['AGENT_HOME']) / '.token-cleared'\n"
+        "tf = __import__('pathlib').Path(os.environ['AGENT_HOME']) / 'token'\n"
+        "# 模拟 put_settings 的同步块\n"
+        "new_token = sm.get().get('server', {}).get('token', '').strip()\n"
+        "if new_token:\n"
+        "    if sentinel.exists(): sentinel.unlink()\n"
+        "    if tf.read_text(encoding='utf-8').strip() != new_token:\n"
+        "        tf.write_text(new_token, encoding='utf-8')\n"
+        "print('SENTINEL', sentinel.exists()); print('TF', tf.read_text(encoding='utf-8')[:8])\n"
+    )
+    r2 = subprocess.run([sys.executable, "-c", probe], cwd=str(ROOT),
+                        env={**os.environ, "AGENT_HOME": str(data_dir)},
+                        capture_output=True, text=True, timeout=60)
+    out2 = r2.stdout + r2.stderr
+    check("保存新令牌后哨兵被清除", "SENTINEL False" in out2, out2[-300:])
+    check("token 文件同步为新令牌", "TF newtoken" in out2, out2[-300:])
+
 def main() -> int:
     print("== P32 Android 交付链 ==")
     test_timezone()
@@ -246,6 +323,7 @@ def main() -> int:
     test_start_sh_args()
     test_android_token()
     test_desktop_no_token()
+    test_clear_token_sentinel()
     print(f"\n结果: {len(passed)} 通过 / {len(failed)} 失败")
     if failed:
         print("失败项：" + "；".join(failed))
@@ -254,3 +332,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

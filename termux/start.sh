@@ -37,13 +37,18 @@ echo "启动口袋 Agent（端口 $PORT）..."
 # 访问令牌：install.sh 生成的 $DATA_DIR/token 优先注入。
 # 只在本进程环境里生效，不写入 config.json —— 令牌文件是唯一事实源，
 # 用户在设置面板改了令牌也不会被这里的旧值覆盖（main.py 只在该值为空时初始化）。
+#
+# 与 --clear-token 的一致性：用户显式清除令牌时（config.json 已无令牌且带
+# --clear-token 标记，由 main.py 写 .token-cleared 哨兵），这里不再注入旧值，
+# 否则 env_token 分支会把旧令牌复活，"清除"永远不生效（2026-10-30 第四轮 D4）。
 TOKEN_FILE="${AGENT_HOME:-$HOME/.agent/termux-agent}/token"
-if [ -z "${AGENT_TOKEN:-}" ] && [ -s "$TOKEN_FILE" ]; then
+CLEAR_SENTINEL="${AGENT_HOME:-$HOME/.agent/termux-agent}/.token-cleared"
+if [ -z "${AGENT_TOKEN:-}" ] && [ -s "$TOKEN_FILE" ] && [ ! -e "$CLEAR_SENTINEL" ]; then
   AGENT_TOKEN="$(cat "$TOKEN_FILE")"
   export AGENT_TOKEN
   echo "已加载访问令牌（$TOKEN_FILE）"
   echo "  浏览器首次打开需要它：cat $TOKEN_FILE"
-  echo "  若忘记：python -m agentd.main --clear-token 后重启（会失去鉴权，仅限本机调试）"
+  echo "  若忘记：python -m agentd.main --clear-token 后重启（仅限本机调试；会同时禁用令牌文件注入）"
 fi
 # 唤醒锁：阻止 CPU 在锁屏后休眠（否则定时任务/工具回调会被系统冻结）。
 # 退出时务必释放，避免空耗电池；termux-wake-lock 不存在（非 Termux）时静默跳过。

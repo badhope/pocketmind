@@ -1481,6 +1481,24 @@ def create_app() -> FastAPI:
         # 类型强制 / 范围收敛（temperature、max_tokens、approval_timeout、字符串截断等）
         # 全部由 pydantic 模型在 Settings.save() 内完成，不再手写 if/else clamp。
         settings_mgr.save(payload)
+        # 令牌状态机同步：
+        #   - 保存了新令牌 → 清除 --clear-token 哨兵、同步 token 文件
+        #     （start.sh / APK 壳都从文件读取，不同步会让壳拿到旧令牌 401）
+        #   - 令牌为空（面板清空）→ 写哨兵，防止 start.sh 复活旧令牌
+        try:
+            new_token = str(settings_mgr.get().get("server", {}).get("token", "")).strip()
+            tf = settings_mgr.path.parent / "token"
+            sentinel = settings_mgr.path.parent / ".token-cleared"
+            if new_token:
+                if sentinel.exists():
+                    sentinel.unlink()
+                if tf.read_text(encoding="utf-8").strip() != new_token:
+                    tf.write_text(new_token, encoding="utf-8")
+                    os.chmod(tf, 0o600)
+            else:
+                sentinel.write_text("cleared", encoding="utf-8")
+        except OSError:
+            pass
         # 与 GET 同一份打码逻辑：保存响应不得回传明文 server.token / tg_token
         from .routes import masked_settings
         return {"ok": True, "settings": masked_settings(settings_mgr.get())}
@@ -1591,6 +1609,15 @@ def main():
     # 不必手工编辑 config.json（此前唯一的出路是手改文件，普通手机用户做不到）。
     if args.clear_token:
         settings_mgr.save({"server": {"token": ""}})
+        # 写哨兵文件：start.sh 看到它就不再注入 $DATA_DIR/token 的旧令牌。
+        # 没有这一步，清除会被 token 文件"复活"——env_token 分支把旧令牌
+        # 写回 config.json，用户以为清掉了，实际还在（第四轮 D4）。
+        try:
+            (settings_mgr.path.parent / ".token-cleared").write_text(
+                "cleared", encoding="utf-8"
+            )
+        except OSError:
+            pass
         print("[agentd] 已清除访问令牌（server.token）。重新启动即可无令牌访问；")
         print("[agentd] 若要对局域网暴露，请重新在「设置」里配置令牌，或用 AGENT_TOKEN 环境变量注入。")
         return

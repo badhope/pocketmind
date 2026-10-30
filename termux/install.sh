@@ -127,9 +127,13 @@ if [ ! -s "$TOKEN_FILE" ]; then
     TOKEN="$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
   fi
   if [ -n "$TOKEN" ]; then
-    umask 077
-    printf '%s' "$TOKEN" > "$TOKEN_FILE"
-    chmod 600 "$TOKEN_FILE"
+    # 子 shell 局部 umask：全局 umask 077 会污染同一 shell 的后续步骤，
+    # 让装完后创建的其它文件全部变成 600。
+    (
+      umask 077
+      printf '%s' "$TOKEN" > "$TOKEN_FILE"
+    )
+    chmod 600 "$TOKEN_FILE" 2>/dev/null || true
     echo "已生成访问令牌（保存在 $TOKEN_FILE，权限 600）"
   else
     echo "⚠️  暂时无法生成访问令牌；agentd 首次启动时会自动生成（无需手工处理）"
