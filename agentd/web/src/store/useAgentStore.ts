@@ -25,7 +25,7 @@ import {
   type StoredMessage,
   type TodoItem,
 } from "../api";
-import { saveTextFile, vibrate } from "../native";
+import { isNativeShell, saveTextFile, vibrate } from "../native";
 import { getThemePref, setThemePref, type ThemePref } from "../theme";
 import { uid, type Msg, type Part } from "../types";
 import { applyEvent, restore } from "./partReducer";
@@ -674,7 +674,14 @@ const _storeCreator: StateCreator<AgentStore, [], []> = (set, get) => {
           return;
         }
 
-        // 浏览器：照常走下载
+        // 非壳环境（真浏览器）：照常走下载。
+        // 注意：壳内 saveTextFile 返回 null（桥失败/权限被拒）时走不到这里的
+        // "浏览器下载也行"——壳内 blob 同样不生效，必须显式报错而不是静默无反应。
+        if (isNativeShell()) {
+          set({ error: "导出失败：原生保存不可用，请重启应用后重试" });
+          return;
+        }
+
         const blob = new Blob([json], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
