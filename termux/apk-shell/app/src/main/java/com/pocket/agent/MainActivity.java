@@ -557,6 +557,16 @@ public class MainActivity extends Activity {
         // 保活服务是本应用存在意义的一部分（agentd 掉线要能通知用户）；
         // 早前在这里 stopService，导致用户一退出界面保活就没了，通知栏也跟着消失。
         // 服务自身由系统按 START_STICKY 管理，用户可在系统设置里停止本应用。
+        // 文件选择器挂起中 Activity 被销毁：必须给 WebView 一个 null 回执，
+        // 否则 Chromium 侧的 FileChooser 通道永远占用，下次 onShowFileChooser 静默失效。
+        if (pendingFileCallback != null) {
+            try {
+                pendingFileCallback.onReceiveValue(null);
+            } catch (Exception ignored) {
+                /* WebView 已失效 */
+            }
+            pendingFileCallback = null;
+        }
         if (web != null) {
             // 先移除 JS 桥再 destroy：addJavascriptInterface 注入的对象会被
             // WebView 的 native 层持有，直接 destroy 在 API 11+ 上存在已知的对象泄漏
