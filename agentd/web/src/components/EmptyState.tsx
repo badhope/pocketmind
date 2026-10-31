@@ -17,10 +17,12 @@ export function EmptyState({
   onPick,
   ready,
   onOpenSettings,
+  onBrowseCapabilities,
 }: {
   onPick: (t: string) => void;
   ready: boolean;
   onOpenSettings: () => void;
+  onBrowseCapabilities: () => void;
 }) {
   return (
     <div className="empty">
@@ -44,6 +46,9 @@ export function EmptyState({
               </button>
             ))}
           </div>
+          <button className="empty-browse" onClick={onBrowseCapabilities}>
+            查看全部 41 项能力 →
+          </button>
           <p className="empty-foot">写文件、发短信、跑命令这类动作，我会先弹卡片让你点头才执行。</p>
         </>
       ) : (
