@@ -60,8 +60,12 @@ test("recipes light", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/", { waitUntil: "networkidle" });
   await page.waitForSelector("textarea");
-  await page.getByRole("button", { name: "定时任务" }).click();
-  await page.waitForTimeout(900);
+  const tasksTab = page.getByRole("tab", { name: "任务" });
+  await tasksTab.click();
+  await expect(tasksTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByText(/^定时任务（\d+）$/)).toBeVisible();
+  await expect(page.getByText("常用模板", { exact: true })).toBeVisible();
+  await expect(page.getByText("低电量提醒")).toBeVisible();
   await page.screenshot({ path: path.join(OUT, "recipes.png") });
 });
 

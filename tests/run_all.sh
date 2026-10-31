@@ -49,12 +49,17 @@ done
 
 GREEN=$'\033[32m'; RED=$'\033[31m'; YELLOW=$'\033[33m'; OFF=$'\033[0m'
 
-PY=""
+PY="${PYTHON:-}"
 if [ "$RUN_BACKEND" = 1 ] || [ "$WITH_E2E" = 1 ]; then
+  if [ -n "$PY" ] && ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null; then
+    echo "PYTHON 指向的解释器不是可用的 Python 3.11+：$PY" >&2
+    exit 2
+  fi
   for cand in python3 python py; do
+    [ -n "$PY" ] && break
     if command -v "$cand" >/dev/null 2>&1 && \
        "$cand" -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null; then
-      PY="$cand"; break
+      PY="$(command -v "$cand")"; break
     fi
   done
   if [ -z "$PY" ]; then
@@ -317,8 +322,13 @@ if [ "$WITH_E2E" = 1 ]; then
     # 桩与 E2E 数据目录：playwright.config.ts 自己用 mkdtemp 建唯一目录，
     # 并在 global-teardown 里删除（显式传 E2E_AGENT_HOME 时保留，便于排障）。
     bash "$ROOT/tests/setup_faketermux.sh" >/dev/null 2>&1 || return 1
+    # Playwright Node 子进程在 Windows 上需要原生路径；Git Bash 的 /c/... 路径不能直接作为解释器。
+    PYTHON_E2E="$PY"
+    if command -v cygpath >/dev/null 2>&1; then
+      PYTHON_E2E="$(cygpath -w "$PY")"
+    fi
     PATH="${FAKETERMUX_DIR:-/tmp/faketermux}:$PATH" \
-      PYTHON="$PY" npm run test:e2e
+      PYTHON="$PYTHON_E2E" npm run test:e2e
   )
   step "E2E（Playwright）" e2e
 fi

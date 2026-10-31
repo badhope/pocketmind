@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = path.resolve(here, "../..");
 const python = process.env.PYTHON || (process.platform === "win32" ? "python" : "python3");
+const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH;
 
 // 每次运行都从空数据目录开始：复用过期的 /tmp/agentd-e2e 会让上一轮的
 // permission_mode=auto（审批卡不再弹出）和历史会话（".row.agent" 取最后一条时错位）
@@ -38,7 +39,10 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        ...(executablePath ? { launchOptions: { executablePath } } : {}),
+      },
     },
   ],
   webServer: {

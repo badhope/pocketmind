@@ -184,6 +184,8 @@ test.describe("手机适配不变量", () => {
       expect(overlays, "覆层按钮被裁出容器或屏幕").toEqual([]);
       if (vp.touch) {
         expect(metrics.smallTargets, "触摸目标低于 36px").toEqual([]);
+        const pillBox = await page.locator(".pill-btn").first().boundingBox();
+        expect(pillBox?.height ?? 0, "状态药丸触摸区低于 44px").toBeGreaterThanOrEqual(44);
         expect(metrics.msgActionOpacity, "触屏上「复制」按钮未常显").toBe("1");
       }
       if (metrics.todo && metrics.composer) {

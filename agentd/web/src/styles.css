@@ -1882,6 +1882,11 @@ body {
   .icon-btn { width: 44px; height: 44px; }
   .approval .btn { min-height: 44px; }
   .thinking-head { min-height: 44px; }
+  .pill-btn {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
 
   /* 2) 触屏无 hover：不能靠悬停揭示任何可点元素 */
   .row .msg-action { opacity: 1; transform: none; }
