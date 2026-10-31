@@ -232,7 +232,7 @@ async def r1b_llm_readiness():
         check("缺 API Key 时仍 False 且只报该项",
               empty.llm_ready() is False and empty.llm_missing() == ["API Key"],
               f"missing={empty.llm_missing()}")
-        empty.save({"llm": {"api_key": "sk-x"}})
+        empty.save({"llm": {"api_key": "fixture-key"}})
         check("三项齐备后 ready=True", empty.llm_ready() is True)
 
         # 开启 LiteLLM 网关时以网关为准（其 key 可来自环境变量）

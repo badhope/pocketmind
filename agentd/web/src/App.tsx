@@ -332,5 +332,5 @@ export default function App() {
 }
 
 function tabLabel(t: TabKey): string {
-  return t === "chat" ? "本地智能体 · 数据只在你设备上" : t === "capability" ? "它能替你做哪些事" : "常驻任务与运行状态";
+  return t === "chat" ? "本地智能体 · 模型请求发往配置端点" : t === "capability" ? "它能替你做哪些事" : "常驻任务与运行状态";
 }

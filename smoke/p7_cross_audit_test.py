@@ -97,11 +97,11 @@ async def main():
     # ---------- A3 密钥不回传 ----------
     out = masked_settings({
         "litellm": {"api_key": "LITELLM-SECRET-9999"},
-        "mcp_client": {"servers": [{"name": "gh", "command": "npx", "env": {"GITHUB_TOKEN": "ghp_SECRET"}}]},
+        "mcp_client": {"servers": [{"name": "gh", "command": "npx", "env": {"GITHUB_TOKEN": "fixture-github-token"}}]},
     })
     blob = json.dumps(out, ensure_ascii=False)
     check("A3 litellm.api_key 已打码", "LITELLM-SECRET-9999" not in blob)
-    check("A3 mcp env 密钥已打码", "ghp_SECRET" not in blob)
+    check("A3 mcp env 密钥已打码", "fixture-github-token" not in blob)
     check("A3 mcp command 等功能字段保留",
           out.get("mcp_client", {}).get("servers", [{}])[0].get("command") == "npx")
 

@@ -71,7 +71,7 @@
 1. `agentd/main.py` 中：
    - `GET /api/memory`、`DELETE /api/memory/{id}`、`POST /api/memory/reset` 均带 `dependencies=[Depends(check_token)]`；
    - **`GET /api/memory/search` 没有该依赖**（唯一漏网的 memory 端点）。
-2. 实测：设置 `server.token="secret-token-123"` 后：
+2. 实测：设置 `server.token="<synthetic-token>"` 后：
    - 无令牌 `GET /api/memory/search?q=test` → **200**
    - 无令牌 `GET /api/memory`、`/api/sessions`、`/api/settings`、`/api/jobs`、`/api/tools`、`/api/export` → 全部 401
 3. 影响：`--lan`/Docker 公网部署时，任意设备无需令牌即可搜索本机长期记忆（Mem0 语义记忆可能含用户隐私）。

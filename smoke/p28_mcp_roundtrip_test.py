@@ -43,7 +43,9 @@ async def run() -> int:
         else:
             check("stdio 握手 + list_tools 成功", True)
 
-        check("工具数量 ≥ 20", len(tools) >= 20, f"count={len(tools)}")
+        check("工具数量 ≥ 41", len(tools) >= 41, f"count={len(tools)}")
+        names = {str(t.get("name", "")) for t in tools}
+        check("运行时工具已注册", {"remember_fact", "read_skill"} <= names, str(sorted({"remember_fact", "read_skill"} - names)))
         check(
             "每个工具都有 object schema",
             bool(tools) and all(isinstance(t.get("inputSchema"), dict) and t["inputSchema"].get("type") == "object" for t in tools),

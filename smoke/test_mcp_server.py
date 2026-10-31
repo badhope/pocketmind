@@ -2,7 +2,7 @@
 """MCP server 验证：把手机工具注册表暴露成 MCP tools。
 
 不依赖真实 MCP 客户端 / stdio，直接在内存里 build_server 后：
-  1. 工具列表非空且 ≥ 20 个（当前内置 41 个）；
+  1. 工具列表至少 41 个，并包含 39 个内置工具与 2 个运行时工具；
   2. 每个工具都带合法 inputSchema（type=object，有 properties）；
   3. 每个工具的 description 带 [safe]/[write]/[danger] 风险前缀；
   4. 调用工具时确实转发到 agentd.tools.call_tool（mock 后断言入参正确）。
@@ -35,7 +35,9 @@ async def run():
 
     # 1. 工具数量
     check("工具列表非空", len(tools) > 0, f"count={len(tools)}")
-    check("至少 20 个工具", len(tools) >= 20, f"count={len(tools)}")
+    check("工具数量至少 41", len(tools) >= 41, f"count={len(tools)}")
+    runtime_names = {"remember_fact", "read_skill"}
+    check("运行时工具已注册", runtime_names <= {t.name for t in tools}, f"missing={runtime_names - {t.name for t in tools}}")
 
     # 2. 每个工具有合法 inputSchema。
     # 字段名以 SDK 实际暴露的为准（1.30 起是驼峰 inputSchema，没有 input_schema 属性）；

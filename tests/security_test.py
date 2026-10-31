@@ -207,8 +207,9 @@ async def test_token_masking():
     print("== 安全-5: 敏感 token 打码 ==")
     from agentd.config import mask_key
 
-    masked = mask_key("sk-abcdefghijklmnopqrstuvwxyz123456")
-    check("mask_key 不透明明文", "abcdefghijklmnopqrstuvwxyz" not in masked and "123456" not in masked[4:-4],
+    fixture_key = "fixture-api-key-alpha-1234567890"
+    masked = mask_key(fixture_key)
+    check("mask_key 不透明明文", fixture_key not in masked and "fixture-api-key-alpha" not in masked,
           masked)
     check("mask_key 空串返回空", mask_key("") == "")
 

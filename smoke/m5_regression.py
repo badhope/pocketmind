@@ -67,9 +67,11 @@ def skip(name, why):
 print("== M5 安全加固回归 ==")
 
 # 1. 打码：设置 32 位 key 后 GET 只回打码
-req("PUT", "/api/settings", {"llm": {"api_key": "sk-abcdefghijklmnopqrstuvwxyz123456", "provider": "deepseek"}})
+fixture_key = "fixture-api-key-alpha-1234567890"
+req("PUT", "/api/settings", {"llm": {"api_key": fixture_key, "provider": "deepseek"}})
 s = req("GET", "/api/settings")
-check("API key 打码", s["llm"]["api_key"] == "sk-a***************************3456" and "sk-abcdefghij" not in s["llm"]["api_key"], s["llm"]["api_key"])
+masked_key = s["llm"]["api_key"]
+check("API key 打码", masked_key == fixture_key[:4] + "*" * (len(fixture_key) - 8) + fixture_key[-4:] and fixture_key not in masked_key, masked_key)
 
 # 2. 数据文件权限（600/700）—— 仅 POSIX 有意义：Windows/NTFS 上 st_mode 不反映
 # chmod（Python 只能近似），断言 0o600 必然是假失败。
@@ -134,7 +136,7 @@ required = {
     "web_search", "read_url",                                  # 联网能力已注册
     "subagent",                                                # 子代理已注册
 }
-check("工具数量不少于 38 项", tools.get("count", 0) >= 38, str(tools.get("count")))
+check("工具数量不少于 41 项", tools.get("count", 0) >= 41, str(tools.get("count")))
 check("工具清单含核心与新增能力", required <= names, str(sorted(required - names)))
 
 print(f"\n结果: {len(passed)} 通过 / {len(failed)} 失败" + (f" / {len(skipped)} 跳过" if skipped else ""))

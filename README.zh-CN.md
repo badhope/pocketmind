@@ -2,7 +2,7 @@
   <img src="assets/pocketmind-logo.png" width="440" alt="PocketMind Logo" />
   <h1>PocketMind · 口袋智灵</h1>
   <p><b>口袋里能真正操作你手机的 always-on Agent</b><br/>
-  本地优先 · 隐私保护 · Termux 原生 · 41 个工具 · 服务端强制审批</p>
+  本地优先 · 隐私保护 · Termux 原生 · 41 个工具（39 个内置 + 2 个运行时）· 服务端强制审批</p>
   <img src="https://github.com/X33834/pocketmind/actions/workflows/ci.yml/badge.svg" alt="CI" />
   <img src="assets/badges/gate.svg" alt="本地门禁" />
   <img src="assets/badges/platform.svg" alt="Platform" />
@@ -27,9 +27,9 @@
 
 ## 为什么需要它
 
-其他 Agent 都跑在你的电脑上，把手机当外设；口袋智灵**跑在手机里**，
-把手机自身的能力当成工具：短信、电话、定位、传感器、通知、剪贴板、WiFi、手电筒、相机、shell、文件。
-合上电脑、锁屏、断网，它照样工作。
+多数 Agent 跑在电脑上，把手机当外设；口袋智灵**直接运行在手机里**，
+把手机自身的能力变成工具：短信、电话、定位、传感器、通知、剪贴板、WiFi、手电筒、相机、shell、文件。
+本地存储与设备工具不依赖电脑；云端推理和联网搜索需要网络。
 
 | | 口袋智灵 | GUI 自动化类（Mobilerun / Mobile-Agent） | 桌面编码类（Cline / Open Interpreter） |
 |---|---|---|---|
@@ -44,10 +44,10 @@
 
 ## 亮点
 
-- **住在手机里，数据不出本机**：会话、记忆、定时任务、文件备份全部落在本地 SQLite（600/700 权限），只有推理请求发到你配置的 LLM 端点；
-- **41 个内建工具**：电量 / 短信 / 拨号 / 定位 / 传感器 / shell / 文件（termux-api），外加任务清单、FTS5 知识库、档案记忆与技能；
-- **审批是安全模型，不是 UI 点缀**：三级授权（允许一次 / 本会话始终 / 全局）+ 全局拒绝名单，服务端强制执行；超时自动拒绝，外部 MCP 工具永远跳不过审批；
-- **桌面 / Telegram 远程遥控**：内置 stdio MCP Server 把 41 个工具暴露给 Claude Desktop / Cline / Codex；Telegram 网关可让 agent 从任何设备驱动与审批；
+- **本地优先存储**：会话、记忆、定时任务、文件备份保存在本地 SQLite；POSIX 环境会将敏感配置与主要数据目录限制为 600/700 权限。发往你配置的 LLM 端点的请求可能包含相关本地上下文；
+- **41 个工具（39 个内置 + 2 个运行时）**：电量 / 短信 / 拨号 / 定位 / 传感器 / shell / 文件（termux-api），外加任务清单、FTS5 知识库、档案记忆与技能；
+- **审批是安全模型，不是 UI 点缀**：Web 与 Telegram agent 链路使用三级授权（允许一次 / 本会话始终 / 全局）+ 全局拒绝名单，服务端强制执行并超时自动拒绝。独立 MCP stdio 调用只带风险标签、不经过 Web 审批中心，需由桌面端自行确认；
+- **桌面 / Telegram 远程控制**：内置 stdio MCP Server 把 41 个工具（39 个内置 + 2 个运行时）暴露给 Claude Desktop / Cline / Codex；可选 Telegram 网关支持远程指令与审批；
 - **备份真的能恢复**：`/api/export` 分页导出全部会话（不再静默截断），`/api/import` 合并恢复并去重；
 - **花多少看得见**：每条回复显示端点真实回报的 token 用量，`/api/stats` 聚合请求、工具失败与 LLM token（`/api/metrics` 为 Prometheus 格式）；
 - **手机端零 Node**：构建好的 `dist/` 直接入库，Termux 里只跑 `install.sh`；可装成 PWA，也可打 WebView 壳 APK（`termux/apk-shell/`）；
@@ -78,9 +78,10 @@
    termux-api（通知/短信/定位/传感器…）   外部 LLM（豆包/DeepSeek/千问/Kimi/智谱/硅基流动…）
 ```
 
-- **全部数据在本机**：会话、消息、记忆摘要、定时任务、文件备份都存本地 SQLite，权限 600/700，重启不丢上下文；
+- **本地数据边界**：会话、消息、记忆摘要、定时任务、文件备份存本地 SQLite；POSIX 环境会将敏感配置与主要数据目录限制为 600/700，重启不丢上下文；模型请求发往用户配置的端点；
+- **外部集成默认可选**：联网搜索/读网页、Telegram、OTLP 链路追踪和 Mem0 可能把查询、消息、追踪数据或上下文发往配置的服务，启用前请检查设置；
 - **LLM 只负责推理**：通过 OpenAI 兼容端点调用，`base_url` + `api_key` 在页面「设置」里配置；
-- **工具审批由服务端强制**：写文件 / shell / 发短信 / 拨号等危险操作需在界面确认，超时自动拒绝。
+- **工具审批由 Web/Telegram agent 链路服务端强制**：写文件 / shell / 发短信 / 拨号等危险操作需在界面或 Telegram 确认，超时自动拒绝；独立 MCP stdio 调用是直接工具接口，需由桌面端自行确认。
 
 ---
 
@@ -187,7 +188,7 @@ AGENT_HOME=/tmp/pa python3 -m agentd.main --port 8787
 | `agentd/web/` | React 前端（Vite+TS），构建产物 `dist/` 由 agentd 直接托管 |
 | `termux/` | 手机端：`install.sh` 一键装依赖 / `start.sh` 启动 / `boot.sh` 开机自启 |
 | `config/` | 预设配方 `recipes.json`（定时任务模板）；LLM 厂商预设见 `agentd/config.py` 的 `PRESETS` |
-| `smoke/` | 回归测试 39 个套件（agent 深度 / 排队 / 定时任务 / 安全 / 配方 / MCP / Telegram / 横向审计 / 审批单测；POSIX 专用检查在非 Linux 上记为「跳过」而非失败），全部由 `tests/run_all.sh` 统一调度 |
+| `smoke/` | 39 个回归套件文件；`tests/run_all.sh` 默认执行主回归，p19 变异测试与 p22 依赖审计需显式开启，平台不适用项由各套件自行标记跳过 |
 
 ---
 
@@ -253,8 +254,8 @@ Plan 模式下 SSE 会发 `{"type": "plan", "plan": "...", "tool_calls": [...]}`
 
 ## MCP Server（远程控制手机）
 
-把手机上的工具（电量 / 短信 / 定位 / 文件 / shell / 任务清单 / 知识库 / 技能等 41 个）暴露成标准 MCP tools，
-让桌面端的 **Claude Desktop / Cline / Codex** 通过 stdio 直接调用，等于用桌面大模型远程操控这台手机。
+把手机上的工具（电量 / 短信 / 定位 / 文件 / shell / 任务清单 / 知识库 / 技能等，共 41 个：39 个内置 + 2 个运行时）暴露成标准 MCP tools，
+让桌面端的 **Claude Desktop / Cline / Codex** 通过 stdio 直接调用。这个独立接口不复用 Web 审批中心，高危调用必须由桌面端或操作人员自行确认。
 
 **启动（独立模式，不启 FastAPI）**：
 ```bash
@@ -317,8 +318,7 @@ bash tests/run_all.sh --with-e2e   # 追加 Playwright（需先装浏览器）
 API 参考：[docs/API.md](docs/API.md)。也可以单独跑某个套件——
 需要服务的那些从环境变量 `AGENTD_BASE` 读取服务地址（默认 `http://127.0.0.1:8799`）。
 
-已在 Windows（Git Bash）与 Linux（Ubuntu 24.04，Python 3.12 / Node 22）双平台实测：
-Linux 下 21 项全过且零跳过；计入 Playwright E2E 为 22/22。
+验证结果取决于运行平台与依赖状态。请在目标环境执行上面的命令；各套件会输出适用的跳过项，主门禁汇总套件级通过/失败状态，任一请求的检查无法通过时返回非 0。
 
 ## License
 

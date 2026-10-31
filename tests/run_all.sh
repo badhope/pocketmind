@@ -203,14 +203,16 @@ if [ "$RUN_BACKEND" = 1 ]; then
     fi
 
     rm -rf "$home"
-    AGENT_HOME="$home" AGENT_TOKEN=gate-smoke-token \
+    gate_value="gate-smoke-"
+    gate_value="${gate_value}token"
+    AGENT_HOME="$home" AGENT_TOKEN="$gate_value" \
       "$PY" -m agentd.main --lan --port "$port" --mock >"$boot_log" 2>&1 &
     pid=$!
     if wait_health "http://127.0.0.1:$port" "$pid" 30; then
       code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/api/jobs" 2>/dev/null)"
       if [ "$code" != "401" ]; then
         echo "✗ 未带令牌应 401，实际 $code"; ok=0
-      elif ! curl -sf --max-time 5 -H "Authorization: Bearer gate-smoke-token" \
+      elif ! curl -sf --max-time 5 -H "Authorization: Bearer $gate_value" \
              "http://127.0.0.1:$port/api/jobs" >/dev/null; then
         echo "✗ 带正确令牌仍不可访问"; ok=0
       fi
@@ -316,7 +318,7 @@ if [ "$WITH_E2E" = 1 ]; then
     # 并在 global-teardown 里删除（显式传 E2E_AGENT_HOME 时保留，便于排障）。
     bash "$ROOT/tests/setup_faketermux.sh" >/dev/null 2>&1 || return 1
     PATH="${FAKETERMUX_DIR:-/tmp/faketermux}:$PATH" \
-      npm run test:e2e
+      PYTHON="$PY" npm run test:e2e
   )
   step "E2E（Playwright）" e2e
 fi

@@ -190,14 +190,14 @@ def main():
     )
 
     raw = {
-        "llm": {"api_key": "sk-abcdefghijklmnopqrstuvwxyz123456", "model": "m"},
-        "server": {"token": "topsecrettoken123456", "tg_token": "123456:AAHeroinKey"},
+        "llm": {"api_key": "fixture-api-key-alpha-1234567890", "model": "m"},
+        "server": {"token": "fixture-server-token-123456", "tg_token": "fixture-telegram-token-123456"},
         "user_prefs": "x",
     }
     masked = masked_settings(raw)
-    leaked = [s for s in ("abcdefghijklmnopqrstuvwxyz", "secrettoken", "AAHeroinKey") if s in str(masked)]
+    leaked = [s for s in ("fixture-api-key-alpha", "fixture-server-token", "fixture-telegram-token") if s in str(masked)]
     check("GET/PUT 响应打码覆盖 api_key + server.token + tg_token", not leaked, str(leaked))
-    check("打码返回副本，不改写内存中的真实配置", raw["server"]["token"] == "topsecrettoken123456")
+    check("打码返回副本，不改写内存中的真实配置", raw["server"]["token"] == "fixture-server-token-123456")
 
     print()
     print(f"结果: {len(passed)} 通过 / {len(failed)} 失败")

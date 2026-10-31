@@ -2,7 +2,7 @@
   <img src="assets/pocketmind-logo.png" width="440" alt="PocketMind Logo" />
   <h1>PocketMind · 口袋智灵</h1>
   <p><b>The always-on Agent that actually operates your phone — right from your pocket.</b><br/>
-  Local-first · Privacy-first · Native on Termux · 41 tools · Server-enforced approval</p>
+  Local-first · Privacy-first · Native on Termux · 41 tools (39 built-in + 2 runtime) · Server-enforced approval</p>
   <img src="https://github.com/X33834/pocketmind/actions/workflows/ci.yml/badge.svg" alt="CI" />
   <img src="assets/badges/gate.svg" alt="Local gate" />
   <img src="assets/badges/platform.svg" alt="Platform" />
@@ -27,10 +27,10 @@ dark theme → mobile viewport. Full video: [docs/demo/pocketmind-demo.mp4](docs
 
 ## Why this exists
 
-Every other agent runs on your laptop and treats the phone as a peripheral.
-PocketMind runs **on the phone itself** and treats the phone's own capabilities as its tools:
-SMS, calls, GPS, sensors, notification, clipboard, Wi-Fi, torch, camera, shell, files.
-It keeps working when the laptop is closed, when the screen is off, and when the network is gone.
+Most agents run on a laptop and treat the phone as a peripheral.
+PocketMind runs **on the phone itself** and exposes the phone's capabilities as tools:
+SMS, calls, GPS, sensors, notifications, clipboard, Wi-Fi, torch, camera, shell, and files.
+Local storage and device tools remain available without a laptop; cloud inference and web search require network access.
 
 | | PocketMind | GUI-automation agents (Mobilerun / Mobile-Agent) | Desktop coding agents (Cline / Open Interpreter) |
 |---|---|---|---|
@@ -45,10 +45,10 @@ The full comparison, with sources and honest gaps, is in [docs/COMPETITORS.md](d
 
 ## Highlights
 
-- **Lives on your phone, data stays on-device** — sessions, memory, jobs and file backups are all in local SQLite (600/700 perms); only inference goes to the LLM endpoint you configure.
-- **41 built-in tools** — battery / SMS / dial / location / sensors / shell / files via termux-api, plus task lists, an FTS5 knowledge base, profile memory and skills.
-- **Approval is a security model, not a UI nicety** — three-level grants (once / always-this-session / global) plus a global deny list, all enforced server-side; timeouts auto-deny, and external MCP tools can never skip approval.
-- **Remote control from desktop or Telegram** — the built-in stdio MCP server exposes all 41 tools to Claude Desktop / Cline / Codex; a Telegram gateway lets you drive and approve from any device.
+- **Local-first storage** — sessions, memory, jobs, and file backups are stored in local SQLite; POSIX deployments restrict sensitive config and primary data stores to 0600/0700. Requests sent to your configured LLM endpoint may include relevant local context.
+- **41 tools (39 built-in + 2 runtime)** — battery / SMS / dial / location / sensors / shell / files via termux-api, plus task lists, an FTS5 knowledge base, profile memory and skills.
+- **Approval is a security model, not a UI nicety** — the Web and Telegram agent paths apply three-level grants (once / always-this-session / global), a global deny list, server-side enforcement, and timeout auto-deny. Standalone MCP stdio calls expose risk tags but do not pass through that Web ApprovalCenter; the desktop host must provide its own confirmation.
+- **Remote control from desktop or Telegram** — the built-in stdio MCP server exposes all 41 tools (39 built-in + 2 runtime tools) to Claude Desktop / Cline / Codex; the optional Telegram gateway supports remote commands and approvals.
 - **Backup that can actually restore** — `/api/export` writes every session (paged, never silently truncated) and `/api/import` merges it back with de-duplication.
 - **Know what it costs** — every reply shows the token usage reported by the endpoint; `/api/stats` aggregates requests, tool failures and LLM tokens (Prometheus format at `/api/metrics`).
 - **Zero Node on the phone** — the built `dist/` ships in the repo; Termux only runs `install.sh`. Works as a PWA, or wraps into an APK (WebView shell in `termux/apk-shell/`).
@@ -81,9 +81,10 @@ with termux-api; web search and cloud models require outbound network.
    termux-api (notify/sms/location/sensors…)   External LLM (OpenAI-compatible endpoint)
 ```
 
-- **All data stays on-device**: sessions, messages, memory summaries, scheduled jobs and file backups live in a local SQLite database (0600/0700 perms); context survives restarts.
+- **Local data boundary**: sessions, messages, memory summaries, scheduled jobs and file backups live in local SQLite; POSIX deployments restrict sensitive config and primary data stores to 0600/0700. Model requests go to the endpoint configured by the user.
+- **External integrations are opt-in**: web search/URL tools, Telegram, OTLP tracing, and Mem0 can send queries, messages, traces, or context to their configured services; review settings before enabling them.
 - **The LLM only reasons**: called through any OpenAI-compatible endpoint — configure `base_url` + `api_key` in the Settings panel.
-- **Approval is enforced server-side**: write/shell/send-SMS/dial etc. require in-UI confirmation and auto-deny on timeout — the model cannot bypass it even when injected.
+- **Approval is enforced server-side for Web and Telegram agent paths**: write/shell/send-SMS/dial etc. require in-UI or Telegram confirmation and auto-deny on timeout. Standalone MCP stdio calls are a separate direct tool interface and require confirmation from the desktop host/operator.
 
 ---
 
@@ -250,7 +251,7 @@ Drive the agent on your phone from a computer or any other device — send messa
 
 ## MCP Server — Remote-Control Your Phone
 
-Expose all on-phone tools (battery / SMS / location / files / shell… 41 tools) as standard MCP tools, so desktop **Claude Desktop / Cline / Codex** can call them over stdio — desktop LLMs operate this phone remotely.
+Expose all on-phone tools (battery / SMS / location / files / shell and more; 41 tools total: 39 built-in + 2 runtime) as standard MCP tools, so desktop **Claude Desktop / Cline / Codex** can call them over stdio. This standalone interface does not reuse the Web ApprovalCenter; high-risk calls must be confirmed by the desktop host/operator.
 
 **Start (standalone, no FastAPI)**:
 ```bash
@@ -317,8 +318,7 @@ API reference: [docs/API.md](docs/API.md). Single suites can still be run alone 
 the API-driven ones read the server base URL from `AGENTD_BASE` (default
 `http://127.0.0.1:8799`).
 
-Verified on both Windows (Git Bash) and Linux (Ubuntu 24.04, Python 3.12 / Node 22):
-21 checks pass with 0 skips on Linux, 22/22 including Playwright E2E.
+Verification is environment-dependent. Run the commands above on the target platform; each suite prints its own applicable skips, while the main gate summarizes suite-level pass/fail status and exits non-zero when a requested check cannot pass.
 
 ## License
 

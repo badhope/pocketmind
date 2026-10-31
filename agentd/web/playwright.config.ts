@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 // 注意：本工程 package.json 为 "type": "module"，不能用 __dirname
 const here = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = path.resolve(here, "../..");
+const python = process.env.PYTHON || (process.platform === "win32" ? "python" : "python3");
 
 // 每次运行都从空数据目录开始：复用过期的 /tmp/agentd-e2e 会让上一轮的
 // permission_mode=auto（审批卡不再弹出）和历史会话（".row.agent" 取最后一条时错位）
@@ -42,9 +43,9 @@ export default defineConfig({
   ],
   webServer: {
     // mock 模式后端：不消耗 LLM 额度，发"你好"会回固定文案，适合确定性 E2E
-    // 解释器按平台选：Windows 上通常只有 python（没有 python3），否则本地跑 E2E 会卡在
-    // "Timed out waiting from config.webServer"（CI 的 ubuntu 用 python3）
-    command: `${process.platform === "win32" ? "python" : "python3"} -m agentd.main --mock --port 8793`,
+    // 默认按平台选择解释器；门禁通过 PYTHON 显式传入项目环境，避免 Windows 上
+    // 误用没有 FastAPI 依赖的系统 Python。
+    command: `${python} -m agentd.main --mock --port 8793`,
     cwd: repoRoot,
     url: "http://127.0.0.1:8793/api/health",
     timeout: 60_000,

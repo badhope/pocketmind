@@ -4,11 +4,11 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>PocketMind · 口袋智灵 — 口袋里能真正操作你手机的 Agent</title>
-<meta name="description" content="PocketMind 口袋智灵：运行在安卓 Termux 上的本地优先 AI Agent。41 个本机工具（手机控制 / 任务清单 / 知识库 / 长期记忆）、服务端强制审批、Plan/Act 双模式、MCP 双端、Telegram 网关。数据只留在你自己的设备上。" />
+<meta name="description" content="PocketMind 口袋智灵：运行在安卓 Termux 上的本地优先 AI Agent。41 个工具（39 个内置 + 2 个运行时）、服务端强制审批、Plan/Act 双模式、MCP 双端与可选 Telegram 网关。本地数据默认存储在设备上，模型请求发往你配置的端点。" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="PocketMind · 口袋智灵" />
 <meta property="og:title" content="PocketMind · 口袋智灵 — 口袋里能真正操作你手机的 Agent" />
-<meta property="og:description" content="运行在安卓 Termux 上的本地优先 AI Agent：41 个本机工具、服务端强制审批、Plan/Act、MCP 双端、Telegram 网关、定时任务与备份恢复。数据只留在你自己的设备上。" />
+<meta property="og:description" content="运行在安卓 Termux 上的本地优先 AI Agent：41 个工具（39 个内置 + 2 个运行时）、服务端强制审批、Plan/Act、MCP 双端、可选 Telegram 网关、定时任务与备份恢复。本地数据默认存储在设备上。" />
 <meta property="og:image" content="assets/pocketmind-logo.png" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="theme-color" content="#0b1016" />
@@ -216,12 +216,12 @@ footer .brand-line img { width: 20px; height: 20px; border-radius: 5px; }
 <header class="hero" id="top">
   <img class="hero-logo reveal" src="assets/pocketmind-logo.png" alt="PocketMind 口袋智灵" />
   <h1 class="reveal">口袋里能真正操作你手机的<br />always-on Agent</h1>
-  <p class="sub reveal">PocketMind 运行在你的安卓手机（Termux）上：发短信、看电池、读定位、写文件、执行脚本——全部本地完成，数据只留在你自己的设备上。</p>
+  <p class="sub reveal">PocketMind 运行在你的安卓手机（Termux）上：发短信、看电池、读定位、写文件、执行脚本——设备操作在本地完成；模型请求发往你配置的端点。</p>
   <div class="hero-cta reveal">
     <a class="btn btn-primary" href="#quickstart">60 秒跑起来</a>
     <a class="btn btn-ghost" href="https://github.com/X33834/pocketmind">查看源码</a>
   </div>
-  <p class="hero-meta reveal">Python · FastAPI · React · 本地 SQLite <span>|</span> 支持 WebUI / PWA / MCP / Telegram <span>|</span> 数据权限 600/700</p>
+  <p class="hero-meta reveal">Python · FastAPI · React · 本地 SQLite <span>|</span> 支持 WebUI / PWA / MCP / Telegram <span>|</span> 敏感数据按平台限制权限</p>
 </header>
 
 <!-- ===== 特性 ===== -->
@@ -229,7 +229,7 @@ footer .brand-line img { width: 20px; height: 20px; border-radius: 5px; }
   <div class="section-head">
     <span class="kicker">CORE ABILITIES</span>
     <h2>不是聊天机器人，是你的手机管家</h2>
-    <p>41 个本机工具被当作一等公民深度集成——从短信、定位、传感器到任务清单、知识库与长期记忆，这是 PocketMind 与桌面 Agent 们最大的区别。</p>
+    <p>41 个工具（39 个内置 + 2 个运行时）被当作一等公民深度集成——从短信、定位、传感器到任务清单、知识库与长期记忆，这是 PocketMind 与桌面 Agent 们最大的区别。</p>
   </div>
   <div class="features reveal">
     <div class="feat">
@@ -240,12 +240,12 @@ footer .brand-line img { width: 20px; height: 20px; border-radius: 5px; }
     <div class="feat">
       <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.6-3 8.4-7 10-4-1.6-7-5.4-7-10V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg></div>
       <h3>本地优先 · 隐私保护</h3>
-      <p>会话、消息、记忆、定时任务全部存本机 SQLite（权限 600/700），默认只监听 127.0.0.1，LLM 只负责推理。</p>
+      <p>会话、消息、记忆、定时任务存本机 SQLite；POSIX 环境会限制敏感配置与主要数据目录权限，默认只监听 127.0.0.1；模型请求发往配置端点。</p>
     </div>
     <div class="feat">
       <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg></div>
       <h3>服务端强制审批</h3>
-      <p>写文件、shell、发短信、拨号等危险操作由服务端审批门强制拦截，超时自动拒绝——模型被注入也绕不过。</p>
+      <p>Web 与 Telegram agent 链路中的写文件、shell、发短信、拨号等危险操作由服务端审批门强制拦截，超时自动拒绝；独立 MCP stdio 调用需由桌面端自行确认。</p>
     </div>
     <div class="feat">
       <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 4l2 5 5 1-4 4 1 6-4-3-4 3 1-6-4-4 5-1 2-5z"/></svg></div>
@@ -260,7 +260,7 @@ footer .brand-line img { width: 20px; height: 20px; border-radius: 5px; }
     <div class="feat">
       <div class="ico"><svg viewBox="0 0 24 24"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 9h8M8 13h5"/></svg></div>
       <h3>MCP 双端</h3>
-      <p>既把 41 个本机工具暴露为标准 MCP Server（stdio），也能接入外部 MCP Server；按注解自动区分只读与危险工具。</p>
+      <p>既把 41 个工具（39 个内置 + 2 个运行时）暴露为标准 MCP Server（stdio），也能接入外部 MCP Server；按注解标出只读与危险工具，独立 stdio 调用由桌面端负责确认。</p>
     </div>
     <div class="feat">
       <div class="ico"><svg viewBox="0 0 24 24"><path d="M8 11a4 4 0 1 1 8 0M8 11v2a1 1 0 0 1-1 1H5a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h6"/><path d="M16 11a4 4 0 1 1 8 0M16 11v2a1 1 0 0 0 1 1h2a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-6"/></svg></div>
@@ -377,7 +377,7 @@ cd pocketmind &amp;&amp; bash termux/install.sh</code></pre>
 <!-- ===== Footer ===== -->
 <footer>
   <div class="brand-line"><img src="assets/pocketmind-icon.png" alt="" />PocketMind · 口袋智灵</div>
-  <p>本地优先 · 隐私保护 · 数据只在你自己的设备上</p>
+  <p>本地优先 · 隐私保护 · 本地数据默认留在设备；模型请求发往配置端点</p>
   <p style="margin-top:6px;opacity:.7">Apache-2.0 License · Built with Python · FastAPI · React</p>
 </footer>
 
