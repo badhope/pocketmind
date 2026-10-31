@@ -2569,7 +2569,9 @@ body {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 16px 14px 24px;
+  /* 底部留出 tab bar 高度（56px）+ 安全区，否则最后一行被页签遮住。
+     实测任务页「可选能力」那行原本被切掉一半。 */
+  padding: 16px 14px calc(72px + env(safe-area-inset-bottom));
 }
 .page-head { margin-bottom: 14px; }
 .page-head h2 {
