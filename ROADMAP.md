@@ -40,6 +40,18 @@ Items move into [CHANGELOG.md](CHANGELOG.md) when they ship.
 | Desktop companion app | exploring | The MCP server already covers most remote-control needs. |
 | iOS | not planned | Termux and `termux-api` have no iOS equivalent; the tool layer would need a full rewrite. |
 
+## Known verification gaps
+
+These are honest statements of what has *not* been proven, kept here so nobody
+mistakes a green local gate for full coverage.
+
+| Gap | Why it exists | What would close it |
+|---|---|---|
+| **CI has never actually run on Linux for this revision.** The gate is green on Windows; two suites (`m5` permission bits, `p3` subprocess reaping) skip themselves on non-POSIX and are asserted only on Linux. | The development host is Windows; no Linux runner or working Docker daemon was available. | One green CI run on `ubuntu-latest`, or `bash tests/run_all.sh` inside a Linux container. |
+| **No real-device APK test.** The APK builds, passes lint, and its manifest/version are verified statically; Robolectric covers the Activity/Service logic. | The host is a KVM guest without nested virtualisation, so AVDs never come up. | Install on a physical Android device and exercise the WebView bootstrap, foreground service and clipboard bridge. |
+| **`mypy` baseline is 95 errors and is not gated.** | The repo predates strict typing; turning it on would block unrelated work. | Fix the 95 errors (mostly `attr-defined` on dict-like config access), then add `mypy` to `run_all.sh`. |
+| **Playwright E2E is opt-in.** | Browsers are a large download; the gate must stay runnable on a phone. | Run `--with-e2e` on CI as a separate job. |
+
 ## Explicitly not planned
 
 - **Play Store distribution.** The app requires `termux-api` permissions and

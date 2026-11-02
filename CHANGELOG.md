@@ -63,6 +63,53 @@ Release mechanics are documented in [docs/VERSIONING.md](docs/VERSIONING.md).
 - `.gitignore` now excludes `.local-artifacts/`, so locally built APKs cannot be
   mistaken for published release assets.
 
+- **`run_shell` crashed on Windows whenever a command timed out.** `_kill_group`
+  called `os.getpgid` / `os.killpg` / `signal.SIGKILL` directly — all POSIX-only —
+  while the `except` clause only caught `(ProcessLookupError, OSError)`. On Windows
+  accessing them raises `AttributeError`, which escaped the tool instead of
+  returning a structured result. The spawn path already guarded `preexec_fn` by
+  platform; the kill path did not. Now capability-checked with a `proc.kill()`
+  fallback. Mutation-verified: removing the guard makes the new `p4` assertion fail
+  with the exact `AttributeError`.
+- **Two CSS cascade bugs, found by a 3x-DPR screenshot sweep.** `.theme` (the theme
+  picker) and `.checkbox-row` are both `<label>` elements, and the settings panel
+  has a generic `.field label { display: block }`. Same specificity, later in the
+  file, so it overrode their `display: flex`. Measured on `.theme`: the swatch sat
+  at y=475..505 and the text started at y=492 — a 13px overlap, so every theme
+  label had its text under the thumbnail. `.checkbox-row` was silently `block`,
+  killing the 8px gap and vertical centring. Both now use `display: flex !important`
+  with an explanation.
+- **`pyproject.toml` pointed mypy at Python 3.11** while the installed dependency
+  tree uses 3.12-only syntax, so mypy aborted before checking any project code.
+  Corrected to 3.12; the real baseline is 95 errors (recorded in ROADMAP, not yet
+  gated).
+
+### Added
+
+- `smoke/p35_css_cascade_test.py` — a CSS cascade guard (9 checks). jsdom does no
+  layout, so Vitest cannot catch this class of bug. It parses `styles.css` and the
+  TSX, maps each class to the real tag it renders on, and flags generic element
+  rules that come later at equal-or-higher specificity. Two hard assertions pin
+  `.theme` and `.checkbox-row` to `!important`. Mutation-verified in both
+  directions.
+- `smoke/p34_user_journey_test.py` — 44 assertions over real HTTP covering the full
+  session lifecycle: create → tool call → approval → persisted result → rename/pin
+  /search/delete → export → idempotent import → job create/run/disable/delete →
+  approval rules → delete. Approval blocks the SSE stream, so it reads the stream on
+  a worker thread and approves from the main thread — the same shape the frontend
+  uses.
+
+- **Secondary pages are code-split.** `SettingsPanel` (1086 lines),
+  `CapabilityPage`, `TasksPage` and `SessionList` were all in the first-load chunk.
+  They are now `React.lazy()` chunks fetched on first tab click. First-load JS
+  307 KB → 264 KB (gzip 102 KB → 89 KB). Verified in a real browser: the initial
+  load requests only `index.js`; clicking the capability tab pulls
+  `CapabilityPage-*.js` on demand.
+- **`CONTRIBUTING`, `SECURITY`, `QUICKSTART`, `DEPLOY` and `CODE_OF_CONDUCT` are now
+  English-first** with full `*.zh-CN.md` counterparts and cross-links. The old
+  `QUICKSTART` still described the deleted goose/Node/Flutter architecture and
+  claimed 2–5 minute installs.
+
 ### Removed
 
 - Untracked build output left in the workspace root
