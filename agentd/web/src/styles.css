@@ -2790,3 +2790,18 @@ body {
     border-right: 1px solid var(--border);
   }
 }
+
+/* ===== 懒加载占位 =====
+ * 设置/能力/任务/会话抽屉按需加载（见 App.tsx 的 lazy()）。加载期间给一个
+ * 居中的轻提示，而不是空白 —— 空白会让人以为页面坏了。高度用 min-height
+ * 顶住，避免 chunk 到达时布局跳动。 */
+.lazy-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  padding: 24px;
+  color: var(--text-3);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}

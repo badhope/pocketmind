@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BottomTabs, type TabKey } from "./components/BottomTabs";
-import { CapabilityPage } from "./components/CapabilityPage";
+import { lazy, Suspense } from "react";
 import { ChatErrorBoundary } from "./components/ChatErrorBoundary";
 import { Composer } from "./components/Composer";
 import { EmptyState } from "./components/EmptyState";
@@ -8,15 +8,39 @@ import { IconChevron, IconGear, IconSessions } from "./components/icons";
 import { MessageItem } from "./components/MessageItem";
 import { PendingApprovalBanner } from "./components/PendingApprovalBanner";
 import { PocketLogo } from "./components/PocketLogo";
-import { SessionList } from "./components/SessionList";
-import { SettingsPanel } from "./components/SettingsPanel";
-import { TasksPage } from "./components/TasksPage";
 import { TokenGate } from "./components/TokenGate";
 import { TodoPanel } from "./components/TodoPanel";
 import { useAgentStore } from "./store/useAgentStore";
 import type { Msg } from "./types";
 import { applyTheme } from "./theme";
 import { reloadPage } from "./native";
+
+/**
+ * 按需加载的次级页面。
+ *
+ * 为什么拆分：SettingsPanel 单文件 1000+ 行，CapabilityPage / TasksPage /
+ * SessionList 也各有百余行，此前全部打进首屏 chunk（307 KB）。这些页面
+ * **首屏根本不需要** —— 用户要先看到对话界面。拆成独立 chunk 后，首屏只
+ * 加载聊天所需代码，设置/能力/任务/会话抽屉在首次点击时才拉取。
+ * 手机上（尤其老 WebView + 慢网络）这直接决定首屏能否快速出现。
+ */
+const CapabilityPage = lazy(() =>
+  import("./components/CapabilityPage").then((m) => ({ default: m.CapabilityPage })),
+);
+const TasksPage = lazy(() =>
+  import("./components/TasksPage").then((m) => ({ default: m.TasksPage })),
+);
+const SessionList = lazy(() =>
+  import("./components/SessionList").then((m) => ({ default: m.SessionList })),
+);
+const SettingsPanel = lazy(() =>
+  import("./components/SettingsPanel").then((m) => ({ default: m.SettingsPanel })),
+);
+
+/** 懒加载页面的占位：保持布局高度，避免加载瞬间页面塌陷跳动。 */
+function LazyFallback() {
+  return <div className="lazy-fallback" role="status" aria-live="polite">加载中…</div>;
+}
 
 /**
  * 应用外壳：三个一级页签 + 可下钻的运行状态。
@@ -289,14 +313,20 @@ export default function App() {
         </>
       )}
 
-      {tab === "capability" && <CapabilityPage onRun={runFromCapability} />}
+      {tab === "capability" && (
+        <Suspense fallback={<LazyFallback />}>
+          <CapabilityPage onRun={runFromCapability} />
+        </Suspense>
+      )}
 
       {tab === "tasks" && (
-        <TasksPage
-          onOpenSession={() => {
-            setTab("chat");
-          }}
-        />
+        <Suspense fallback={<LazyFallback />}>
+          <TasksPage
+            onOpenSession={() => {
+              setTab("chat");
+            }}
+          />
+        </Suspense>
       )}
 
       <BottomTabs
@@ -306,6 +336,7 @@ export default function App() {
       />
 
       {showSessions && (
+        <Suspense fallback={<LazyFallback />}>
         <SessionList
           sessions={sessions}
           currentId={sessionId}
@@ -320,8 +351,10 @@ export default function App() {
           onRename={onRenameSession}
           onPin={(sid, pinned) => void onPinSession(sid, pinned)}
         />
+        </Suspense>
       )}
       {showSettings && (
+        <Suspense fallback={<LazyFallback />}>
         <SettingsPanel
           onClose={() => setShowSettings(false)}
           mock={mock}
@@ -329,6 +362,7 @@ export default function App() {
           onTheme={setTheme}
           onExport={() => void onExport()}
         />
+        </Suspense>
       )}
     </div>
   );
