@@ -178,3 +178,6 @@ nul
 
 # 本机构建产物（不入库）：APK 等可分发文件放这里
 .local-artifacts/
+
+# 本机构建用的隔离 Gradle 主目录（避免用户级 init 脚本污染）
+.gradle-home/
