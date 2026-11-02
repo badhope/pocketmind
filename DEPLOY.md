@@ -1,57 +1,104 @@
-# 部署指南（口袋智灵）
+# Deployment Guide
 
-本项目可一键部署为公网可访问的网站（Web UI + agentd 后端一体，前端 dist 内置，无需 Node）。
+[简体中文](DEPLOY.zh-CN.md) · [English](DEPLOY.md)
 
-## 方式一：本机/VPS 一键部署（推荐）
+PocketMind ships as a single process: FastAPI serves both the API and the pre-built
+frontend, so a deployment needs no Node toolchain.
+
+> **Read [SECURITY.md](SECURITY.md) first.** This is a single-user agent. If you expose
+> it to a network, the access token is the only thing between the internet and
+> arbitrary shell execution on that host.
+
+## Option 1 — one command on a VPS (recommended)
 
 ```bash
-git clone https://gitcode.com/badhope/pocketmind && cd pocketmind   # 主仓库（Gitee / GitHub 各有镜像）
-# root 用户：
+git clone https://gitcode.com/badhope/pocketmind && cd pocketmind
 bash deploy/deploy.sh
-# 非 root：同样执行，自动走 nohup 分支（nginx 反代需 root，非 root 跳过）
 ```
 
-脚本自动完成：装依赖 → 初始化数据目录（700）→ 生成随机访问令牌 → 以 `--lan` 模式常驻启动 → nginx 反代 80 端口。
+The script installs dependencies, creates the data directory (mode 700), generates a
+random access token, starts the service in `--lan` mode, and configures an nginx
+reverse proxy on port 80. Run it as root for the nginx step; as a normal user it falls
+back to `nohup` and skips the proxy.
 
-**部署后：**
-- 访问 `http://<服务器IP>/`（80 端口）
-- 首次打开若提示「需要访问令牌」，在弹出的令牌输入框里填一次脚本输出的那串即可（会记在本机浏览器）
-- ⚠ 页面上看到的令牌是**打码**的（`sk-1****ef` 这种），拿不回明文；忘了令牌就在服务器上执行
-  `python3 -m agentd.main --clear-token` 清除后重设
-- ⚙ 设置 → 选 LLM 厂商 → 填 API Key → 保存 → 开聊
+After deploying:
 
-## 方式二：Docker（任一有 Docker 的机器）
+- Open `http://<server-ip>/`.
+- If the page asks for an access token, paste the one the script printed. It is stored
+  in your browser from then on.
+- **The token shown in the UI is masked** (`sk-1****ef`). There is no way to recover the
+  plaintext from the page. If you lose it:
+  `python3 -m agentd.main --clear-token` on the server, then set a new one.
+- Settings → pick a provider → paste your API key → save.
+
+## Option 2 — Docker
 
 ```bash
-# 1. 设置访问令牌（必填，公网安全）
 export AGENT_TOKEN="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-# 2. 启动
 docker compose up -d
-# 3. 访问 http://<服务器IP>:8787
 ```
 
-`AGENT_TOKEN` 只在**首次**（数据卷里还没有令牌时）写入 `config.json`；之后以卷里的配置为准，
-改环境变量不会覆盖你已在页面上改过的令牌。
+Open `http://<server-ip>:8787`.
 
-## 方式三：手动（简单验证）
+`AGENT_TOKEN` is written into `config.json` **only on first start**, when the volume has
+no token yet. After that the volume's config wins — changing the environment variable
+will not overwrite a token you set in the UI.
+
+## Option 3 — manual (for a quick check)
 
 ```bash
-python3 -m pip install -r agentd/requirements.txt
-# --lan 且没有令牌会直接拒绝启动（安全策略），所以要么先注入令牌，要么先本机起服务在页面里设：
-AGENT_TOKEN="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')" python3 -m agentd.main --lan --port 8787
-# 访问 http://127.0.0.1:8787（本机）或 http://<IP>:8787（局域网/公网，需带 Bearer 令牌）
+pip install -r agentd/requirements.txt
+
+# --lan without a token refuses to start (that is deliberate)
+AGENT_TOKEN="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
+  python3 -m agentd.main --lan --port 8787
 ```
 
-## 生产环境建议
+Then `http://127.0.0.1:8787` locally, or `http://<ip>:8787` from the network (with the
+Bearer token).
 
-| 项 | 建议 |
+## Production checklist
+
+| Item | Guidance |
 |---|---|
-| HTTPS | nginx 用 certbot（Let's Encrypt）或云厂商证书；docker 部署可前置 Caddy 自动 HTTPS |
-| 访问令牌 | 强令牌（脚本已生成 48 位随机）；页面设置里可随时改 |
-| 数据备份 | `AGENT_HOME`（默认 `~/.agent/termux-agent`）整目录定期备份，含会话/记忆/定时任务/checkpoints |
-| 资源 | 单进程即可支撑个人使用；内存约 150-300MB（Python+SQLite） |
-| 安全边界 | LLM 输出在页面经 DOMPurify 消毒；服务端危险工具需审批；`--lan` 必须配令牌 |
+| **HTTPS** | Terminate TLS in front. nginx + certbot (Let's Encrypt), a cloud provider certificate, or Caddy in front of Docker. Never expose uvicorn directly. |
+| **Access token** | The script generates 48 random hex characters. Rotate it if it ever appeared in a log, a screenshot or a chat. |
+| **Backups** | Back up the whole `AGENT_HOME` directory (default `~/.agent/termux-agent`). It contains sessions, memory, scheduled jobs and checkpoints. `GET /api/export` gives a portable JSON bundle. |
+| **Resources** | One process is enough for personal use: roughly 150–300 MB RSS with Python + SQLite. |
+| **Process supervision** | `deploy/systemd/` has a unit file. Use it instead of `nohup` if the host reboots. |
+| **SSE and proxies** | Any reverse proxy must disable response buffering, or streaming replies arrive all at once at the end. `deploy/nginx/agentd.conf` already sets `proxy_buffering off`. |
+| **Firewall** | Only expose the proxy port. `8787` should be bound to localhost if a proxy sits in front. |
 
-## 服务器侧代理（可选）
+## Reverse proxy
 
-仓库提供现成 nginx 配置：`deploy/nginx/agentd.conf`（已关闭 SSE 缓冲，`proxy_buffering off`）。
+A working nginx config is included at `deploy/nginx/agentd.conf`. The parts that matter:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+
+    # Required for SSE. Without this the stream is buffered and the UI appears frozen.
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+}
+```
+
+## Docker notes
+
+- The image runs as a single process; the frontend is baked in at build time.
+- Mount a volume at `/data` and set `AGENT_HOME=/data` so sessions survive a recreate.
+- `config/recipes.json` is copied into the image — it is read from the repository root.
+
+## What a deployment is *not*
+
+- **Not multi-tenant.** There is no user model. One token, one user, one data directory.
+  Do not host it for several people.
+- **Not hardened against a hostile model.** Prompt injection is out of scope; the
+  approval gate is the mitigation, and it assumes a human is watching the first time a
+  dangerous tool runs.
+- **Not a sandbox for shell.** `run_shell` executes as the service user. Run it as an
+  unprivileged user with a dedicated home directory.

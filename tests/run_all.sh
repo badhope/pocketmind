@@ -169,6 +169,7 @@ if [ "$RUN_BACKEND" = 1 ]; then
   step "p32 Android 交付链（回环鉴权 / 时区 / 端口自检 / start.sh 参数）" run_py smoke/p32_android_delivery_test.py
   step "p33 Mock 多轮工具调用（同会话第二轮 / 调用 id 唯一 / 无 user 消息）" run_py smoke/p33_mock_multiturn_test.py
   step "p34 用户旅程（真实 HTTP：会话→工具→审批→导出导入→定时任务→删除）" run_py smoke/p34_user_journey_test.py
+  step "p35 CSS 层叠守卫（通用规则不得压掉组件布局）" run_py smoke/p35_css_cascade_test.py
   step "版本一致性（main.py / package.json / gradle.properties）" run_py tests/check_version.py
   if [ "$WITH_DEP_AUDIT" = 1 ]; then
     step "p22 依赖漏洞扫描（OSV.dev，需外网）" run_py smoke/p22_dep_audit_test.py

@@ -1,30 +1,82 @@
-# 贡献者行为准则
+# Contributor Covenant Code of Conduct
 
-## 我们的承诺
+[简体中文](CODE_OF_CONDUCT.zh-CN.md) · [English](CODE_OF_CONDUCT.md)
 
-为营造开放、友好的环境，我们承诺：参与本项目的每个人都将免受骚扰，无论年龄、体型、身心障碍、种族、性别认同与表达、经验水平、国籍、外貌、宗教信仰或性取向。
+## Our Pledge
 
-## 我们的准则
+We as members, contributors, and maintainers pledge to make participation in this
+project a harassment-free experience for everyone, regardless of age, body size,
+visible or invisible disability, ethnicity, sex characteristics, gender identity and
+expression, level of experience, education, socio-economic status, nationality,
+personal appearance, race, religion, or sexual identity and orientation.
 
-营造正向环境的行为包括：
+We pledge to act and interact in ways that contribute to an open, welcoming, diverse,
+inclusive, and healthy community.
 
-- 使用友好、包容的语言
-- 尊重不同的观点与经验
-- 优雅地接受建设性批评
-- 关注对社区最有利的事
-- 对其他社区成员保持同理心
+## Our Standards
 
-不可接受的行为包括：
+Examples of behaviour that contributes to a positive environment:
 
-- 性化语言与意象、恶意的人身攻击或政治攻击
-- 公开或私下的骚扰行为
-- 未经明确许可发布他人的隐私信息（如地址、电子邮箱）
-- 其他在专业场合可合理认定为不当的行为
+- Demonstrating empathy and kindness toward other people
+- Being respectful of differing opinions, viewpoints, and experiences
+- Giving and gracefully accepting constructive feedback
+- Accepting responsibility and apologising to those affected by our mistakes, and
+  learning from the experience
+- Focusing on what is best not just for us as individuals, but for the overall
+  community
 
-## 责任与适用范围
+Examples of unacceptable behaviour:
 
-项目维护者有责任对「可接受行为」的标准做出澄清，并有权对任何不当行为采取删除评论、锁定会话、封禁参与者等适当措施。本准则适用于本项目内外的所有公共空间。
+- The use of sexualised language or imagery, and sexual attention or advances of any kind
+- Trolling, insulting or derogatory comments, and personal or political attacks
+- Public or private harassment
+- Publishing others' private information, such as a physical or email address, without
+  their explicit permission
+- Other conduct which could reasonably be considered inappropriate in a professional
+  setting
 
-## 联系方式
+## Enforcement Responsibilities
 
-遇到不当行为，请通过仓库的 Issue 区或仓库所有者主页提供的联系方式向项目维护者举报。所有申诉都会被审阅并尽快处理，维护者承诺对举报人保密。
+Maintainers are responsible for clarifying and enforcing these standards and will take
+appropriate and fair corrective action in response to any behaviour they deem
+inappropriate, threatening, offensive, or harmful.
+
+Maintainers have the right and responsibility to remove, edit, or reject comments,
+commits, code, wiki edits, issues, and other contributions that are not aligned with
+this Code of Conduct, and will communicate reasons for moderation decisions when
+appropriate.
+
+## Scope
+
+This Code of Conduct applies within all community spaces, and also applies when an
+individual is officially representing the community in public spaces.
+
+## Enforcement
+
+Instances of abusive, harassing, or otherwise unacceptable behaviour may be reported to
+the maintainers responsible for enforcement through the private channel described in
+[SECURITY.md](SECURITY.md). All complaints will be reviewed and investigated promptly
+and fairly.
+
+All maintainers are obligated to respect the privacy and security of the reporter of
+any incident.
+
+## Enforcement Guidelines
+
+Maintainers will follow these Community Impact Guidelines in determining the
+consequences for any action they deem in violation of this Code of Conduct:
+
+1. **Correction** — a private, written warning, providing clarity around the nature of
+   the violation and an explanation of why the behaviour was inappropriate.
+2. **Warning** — a warning with consequences for continued behaviour, including no
+   interaction with the people involved for a specified period.
+3. **Temporary ban** — a temporary ban from any sort of interaction or public
+   communication with the community for a specified period.
+4. **Permanent ban** — a permanent ban from any sort of public interaction within the
+   community.
+
+## Attribution
+
+This Code of Conduct is adapted from the [Contributor Covenant](https://www.contributor-covenant.org),
+version 2.1, available at
+https://www.contributor-covenant.org/version/2/1/code_of_conduct.html.

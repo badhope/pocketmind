@@ -716,7 +716,10 @@ body {
   flex-shrink: 0;
 }
 .checkbox-row {
-  display: flex;
+  /* 同 .theme：这是 <label>，会被 .field label { display:block } 压掉。
+   * 实测 computed display 是 block 而非 flex —— 复选框与文字之间的 8px gap
+   * 和垂直居中全部失效，只是看起来"还能用"所以一直没被发现。 */
+  display: flex !important;
   align-items: center;
   gap: 8px;
   font-size: 13px;
@@ -1524,7 +1527,11 @@ body {
   gap: 8px;
 }
 .theme {
-  display: flex;
+  /* 必须压过 .field label { display: block }：主题选项是 <label>，而它同时
+   * 匹配那条通用规则。两条选择器权重相同，靠后者生效 —— 结果 label 变成
+   * block，flex 的纵向排列失效，缩略图与文字左右重叠（实测文字 y=492 与
+   * SVG y=475..505 重叠 13px）。这里显式提高优先级。 */
+  display: flex !important;
   flex-direction: column;
   align-items: center;
   gap: 6px;
