@@ -26,12 +26,29 @@ if [ -z "${ANDROID_HOME:-}${ANDROID_SDK_ROOT:-}" ] && [ ! -f local.properties ];
   exit 2
 fi
 
-# wrapper 优先（版本锁定），缺失时回退系统 gradle
+# wrapper 优先（版本锁定），缺失时回退系统 gradle。
+#
+# 为什么还要处理「wrapper 存在但跑不起来」：wrapper 首次运行会去
+# services.gradle.org 下载发行包。在网络受限的机器上（本机实测：下载 8.9 超时）
+# 它会直接抛 SSL/超时异常退出，而系统里往往已经装了可用的 gradle。原来只看
+# 「文件是否存在」，于是脚本在有 gradle 的机器上仍然构建失败。这里改成先探测
+# wrapper 能不能真的报出版本，不能就回退并说明原因。
 if [ -f ./gradlew ]; then
-  GRADLE=(bash ./gradlew)
+  if wrapper_version=$(bash ./gradlew --version 2>/dev/null | grep -m1 '^Gradle '); then
+    GRADLE=(bash ./gradlew)
+    echo "使用 gradle wrapper（$wrapper_version）"
+  elif command -v gradle >/dev/null 2>&1; then
+    GRADLE=(gradle)
+    echo "警告：gradle wrapper 不可用（通常是发行包下载失败），回退系统 gradle" >&2
+    echo "      若需固定版本，请先联网运行一次 ./gradlew --version 让发行包落盘" >&2
+  else
+    echo "gradle wrapper 不可用，且系统没有 gradle。" >&2
+    echo "请联网后运行一次 ./gradlew --version 完成发行包下载。" >&2
+    exit 2
+  fi
 else
   GRADLE=(gradle)
-  echo "警告：gradlew 缺失（正常仓库里应有 wrapper jar），回退系统 gradle"
+  echo "警告：gradlew 缺失（正常仓库里应有 wrapper jar），回退系统 gradle" >&2
 fi
 
 [ "$#" -le 1 ] || { echo "参数过多" >&2; exit 2; }
