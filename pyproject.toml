@@ -35,7 +35,7 @@ python_files = ["test_*.py", "*_test.py", "eval_*.py"]
 #     以及 mcp SDK 泛型 ClientSession 的已知不兼容，均非运行期 bug（P0/P1 已修）。
 #   跑法：python -m mypy agentd/ --ignore-missing-imports
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 ignore_missing_imports = true
 warn_unused_ignores = false
 warn_redundant_casts = true

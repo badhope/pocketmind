@@ -255,6 +255,15 @@ async def r1c_shell_platform():
           set(out.keys()) >= {"ok", "exit_code", "stdout", "stderr", "timed_out"},
           f"keys={sorted(out.keys())}")
 
+    # 超时会走 _kill_group。该函数曾直接用 os.getpgid / os.killpg / signal.SIGKILL，
+    # 三者都是 POSIX 专有；Windows 上访问它们抛 AttributeError，而旧实现只捕
+    # (ProcessLookupError, OSError)，于是整条 run_shell 直接崩。这条断言要求：
+    # 超时后仍返回结构化结果，而不是抛异常。
+    timed = await run_shell("sleep 30", timeout=1)
+    check("超时后返回结构化结果而不是崩溃",
+          isinstance(timed, dict) and timed.get("timed_out") is True,
+          f"result={str(timed)[:140]}")
+
 
 async def r2_orphan_recovery():
     section("R2 中断后孤立 tool_calls 回填")

@@ -41,6 +41,16 @@ def _kill_group(proc: asyncio.subprocess.Process) -> None:
     """
     if proc.returncode is not None:
         return
+    # os.getpgid / os.killpg / signal.SIGKILL 都是 POSIX 专有。Windows 上它们
+    # 根本不存在，访问会抛 AttributeError —— 而旧实现只捕 (ProcessLookupError,
+    # OSError)，AttributeError 会直接冒出去把 run_shell 打断。
+    # 先在能力层面判断，再按平台选回收方式。
+    if not (hasattr(os, "getpgid") and hasattr(os, "killpg") and hasattr(signal, "SIGKILL")):
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        return
     try:
         pgid = os.getpgid(proc.pid)
         os.killpg(pgid, signal.SIGKILL)
