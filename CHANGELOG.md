@@ -1,66 +1,147 @@
-# 更新日志
+# Changelog
 
-本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
+All notable changes to this project are documented in this file.
+
+The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/).
+Release mechanics are documented in [docs/VERSIONING.md](docs/VERSIONING.md).
+
+> Entries from 1.2.1 onward are written in English. Entries for 1.2.0 and earlier
+> are preserved verbatim in their original language as a historical record.
 
 ## [Unreleased]
 
-## [1.2.1] - 2026-10-29
+## [1.2.1] - 2026-11-02
 
-### 修复（Android 交付化专项，问题台账见 `docs/audit-2026-10-29.md`）
+### Fixed
 
-- **仓库从未产出过 APK，干净克隆也构建不出来**：`.gitignore` 的 `*.jar` 把
-  `gradle-wrapper.jar` 一并排除，`./gradlew` 直接 `ClassNotFoundException:
-  GradleWrapperMain` —— 而文档恰恰让人用 `./gradlew`。现在 wrapper jar 入库，
-  新增 `scripts/build-apk.sh`（本地/CI 同一份逻辑）与 CI `android` job
-  （lint + assembleDebug + assembleRelease + 签名/对齐/版本校验 + 上传制品）。
-- **APK 版本号与后端不一致**：壳停在 `1.0.0`，后端与前端是 `1.2.0`。版本改为
-  `gradle.properties` 单源，新增 `tests/check_version.py` 做一致性门禁。
-- **Android 13 上前台服务启动即崩**：manifest 只声明 `specialUse`，而
-  `MonitorService` 在 API 33 传 `FOREGROUND_SERVICE_TYPE_DATA_SYNC`；
-  运行时类型必须是 manifest 声明的子集，否则 `startForeground` 抛异常。
-  manifest 改为 `specialUse|dataSync` 并补 `FOREGROUND_SERVICE_DATA_SYNC` 权限。
-- **"保活"在退出界面后失效**：`MainActivity.onDestroy` 调了 `stopMonitorService()`，
-  用户一退出 App 前台服务就被杀。移除该调用。
-- **WebView 桥缺少信任边界**：没有 `shouldOverrideUrlLoading`，任意链接都在带
-  `PocketNative` 桥的 WebView 里打开；`deployAgent(repoUrl)` 还把 URL 直接拼进
-  shell 命令。现在只允许 `127.0.0.1`/`localhost`/`file:///android_asset`，
-  外链交给系统浏览器；桥方法逐个校验当前页面 URL；仓库地址做字符集校验 + POSIX
-  单引号转义；默认地址改由 `resValue` 注入（Java 与引导页同源）。
-- **Android 上 127.0.0.1 无鉴权等于全机可读**：`check_token` 在令牌为空时直接放行，
-  而安卓的回环端口是全机共享命名空间，同机任意 App 都能读会话、调用 shell。
-  现在 `install.sh` 生成随机令牌（600）、`start.sh` 自动注入、后端在 Android 运行时
-  自动生成并落盘；壳通过 Termux 读出令牌注入 WebView；非壳环境（浏览器/PWA）
-  首屏给出令牌输入层 —— 此前令牌入口只在设置面板里，而设置面板本身需要令牌，
-  首次用 `--lan` 启动的用户必然 401 死锁。
-- **定时任务时区恒退 UTC**：`apscheduler.util.timezone` 在 3.11 起是
-  `datetime.timezone` 类，传字符串抛 `TypeError` 被吞，导致"每天 8 点"按 UTC
-  触发（北京时间 16 点）。改用 `zoneinfo.ZoneInfo`，TZ → Asia/Shanghai → UTC 降级。
-- **环境自检端口项恒报错**：`_probe_port` bind 服务自己正在监听的端口，
-  每个用户首次打开设置都会看到一条假故障。改为先 connect 判断"正在监听"。
-- **错误页拼写与按钮**：`~/poketmind` → `~/pocketmind`；「启动服务」原先只把
-  Termux 拉到前台、不执行 `start.sh`，现在真正调用 `startAgent`。
-- **前端产物 ES2020，老 WebView 可能白屏**：构建目标降到 `es2017`。
-- **`native.ts` 桥声明不全**：补 `notify/readToken/getRepoUrl/deployAgent/
-  startAgent/checkAgain/openFdroid`，非壳环境全部安全降级。
-- **APK 清单**：`allowBackup=false`（令牌不进云备份）、
-  `usesCleartextTraffic=false`（明文只对 127.0.0.1 放行）；cutout 属性移到
-  `values-v27`（minSdk 26 不再报 NewApi）、新增 `values-v35` 退出强制
-  edge-to-edge、`registerReceiver` 补未导出标志 —— `lintDebug` 从 2 error 到 0。
+- **The committed Android wrapper was not executable.** `gradlew` was tracked with
+  mode `100644`, so `./gradlew` failed with `Permission denied` on every Linux CI
+  runner and on any fresh clone — while the docs instruct users to run exactly
+  that command. It is now tracked as `100755`. The same audit corrected the mode
+  of `scripts/*.sh`, `tests/run_all.sh`, `tests/setup_faketermux.sh` and
+  `tools/android-vm/*.sh`.
+- **A Vitest memory-tuning block was added to a config file that Vitest never
+  reads.** The `test` section landed in `vite.config.ts`, but Vitest resolves
+  `vitest.config.ts` first, so the block was dead. Forcing
+  `--config vite.config.ts` proved it: 13 of 16 test files failed because the
+  jsdom environment was missing. The worker-pool limits and timeout now live in
+  `vitest.config.ts`, where they take effect (69/69 still green).
+- **Version drift between the changelog and the code.** This changelog documented
+  1.2.1, but `agentd/main.py`, `agentd/web/package.json` and
+  `termux/apk-shell/gradle.properties` all still reported 1.2.0, and no `v1.2.1`
+  tag existed. All three now report 1.2.1, `package-lock.json` matches, and
+  `VERSION` at the repository root mirrors the same value.
+- **`scripts/build-apk.sh` printed a stale warning.** A successful debug build
+  ended with "current build is a Kotlin migration prototype, not distributable",
+  which stopped being true once the Kotlin spike was archived.
 
-### 新增
+### Changed
 
-- `smoke/p32_android_delivery_test.py`（22 项）：回环鉴权、时区、端口自检、
-  `start.sh` 参数解析。
-- `tests/check_version.py`：版本三处一致性门禁。
-- `scripts/build-apk.sh`：一条命令构建 + 产物校验。
-- `agentd/web/src/components/TokenGate.tsx`：首屏令牌输入层。
+- **The Kotlin migration spike moved out of the shipped application.** The
+  Slice 1–2 experiment replaced the WebView shell's Termux bridge with an
+  in-process native HTTP service that answered `503 not_implemented` for every
+  business endpoint — chat, tools, settings, sessions, export/import, approvals
+  and jobs all stopped working inside the APK. It is preserved verbatim, together
+  with its migration contract, shared test vectors and test suite, under
+  `docs/history/kotlin-migration-slice2/`, and recorded in
+  [ROADMAP.md](ROADMAP.md) as an exploration. The shipped APK keeps the working
+  Termux-backed shell. No Kotlin source remains under `termux/apk-shell/app/src`.
+- **Branch topology reduced to a single long-lived branch.** The stale
+  `feature/kotlin-migration-slice1` branch pointed at the same commit as `main`;
+  it was deleted so that local and every remote expose `main` only.
 
-### 文档
+### Documentation
 
-- `docs/audit-2026-10-29.md`：完整问题台账（A/B/C 三级共 22 项）。
-- 安装耗时统一改为「真机 10-30 分钟 / 模拟器约 50 分钟」（原写 3-8 分钟，
-  与项目自己的实测文档差一个数量级）。
-- 工具数 31 → 41、测试套件 33 → 39。
+- Added [docs/VERSIONING.md](docs/VERSIONING.md): SemVer policy, the three
+  single-source version locations, the release checklist, and branch/tag rules.
+- Added [ROADMAP.md](ROADMAP.md): what ships today, what is next, and what is
+  explicitly not planned.
+- Added `VERSION` at the repository root, and
+  `docs/history/kotlin-migration-slice2/README.md` explaining why the spike was
+  archived rather than shipped.
+- `.gitignore` now excludes `.local-artifacts/`, so locally built APKs cannot be
+  mistaken for published release assets.
+
+### Removed
+
+- Untracked build output left in the workspace root
+  (`artifacts/pocketmind-shell-*.apk`) was moved into the ignored
+  `.local-artifacts/` directory. Those binaries still contained the removed
+  `PocketNative` bridge and `MonitorService`, so they could not be published.
+
+### Fixed — Android delivery (2026-10-29 audit, full ledger in `docs/audit-2026-10-29.md`)
+
+- **The repository had never produced an APK, and a clean clone could not build
+  one.** `.gitignore`'s blanket `*.jar` rule also excluded `gradle-wrapper.jar`,
+  so `./gradlew` died with `ClassNotFoundException: GradleWrapperMain` — while the
+  documentation told people to use exactly that command. The wrapper jar is now
+  tracked, `scripts/build-apk.sh` provides one command for local and CI use, and
+  the CI `android` job runs lint, assembleDebug, assembleRelease, signature /
+  alignment / version verification, and artifact upload.
+- **APK version disagreed with the backend.** The shell was pinned at `1.0.0`
+  while the backend and frontend were `1.2.0`. The version is now single-sourced
+  from `gradle.properties`, with `tests/check_version.py` as the gate.
+- **The foreground service crashed on Android 13 at startup.** The manifest
+  declared only `specialUse`, while `MonitorService` passed
+  `FOREGROUND_SERVICE_TYPE_DATA_SYNC` on API 33; the runtime type must be a subset
+  of the manifest declaration or `startForeground` throws. The manifest now
+  declares `specialUse|dataSync` and adds `FOREGROUND_SERVICE_DATA_SYNC`.
+- **Keep-alive stopped working as soon as the UI closed.** `MainActivity.onDestroy`
+  called `stopMonitorService()`, so the foreground service died with the Activity.
+  The call was removed.
+- **The WebView bridge had no trust boundary.** Without `shouldOverrideUrlLoading`
+  any link opened inside the WebView that carried the `PocketNative` bridge, and
+  `deployAgent(repoUrl)` interpolated a URL into a shell command. Navigation is now
+  restricted to `127.0.0.1` / `localhost` / `file:///android_asset`, external links
+  go to the system browser, each bridge method validates the current page URL, and
+  the repository URL is charset-validated and POSIX single-quote escaped. The
+  default URL is injected through `resValue` so Java and the setup page agree.
+- **On Android, an unauthenticated `127.0.0.1` is readable by the whole device.**
+  `check_token` allowed every request when the token was empty, and Android's
+  loopback port is a device-wide namespace — any other app could read sessions and
+  call shell. `install.sh` now generates a random token (0600), `start.sh` injects
+  it, and the backend generates and persists one at runtime on Android. The shell
+  reads the token out of Termux and injects it into the WebView; non-shell
+  environments (browser / PWA) get a first-screen token entry — previously the only
+  entry was inside Settings, which itself required the token, so a first `--lan`
+  start was a guaranteed 401 deadlock.
+- **Scheduled jobs always fell back to UTC.** Since APScheduler 3.11,
+  `apscheduler.util.timezone` is `datetime.timezone` and passing a string raises
+  `TypeError`, which was swallowed — so "8 AM daily" fired at 16:00 Beijing time.
+  Now uses `zoneinfo.ZoneInfo` with TZ → Asia/Shanghai → UTC fallback.
+- **The environment self-check always reported a port fault.** `_probe_port` tried
+  to bind the port the service was already listening on, so every user saw a false
+  fault on first opening Settings. It now connects first to detect a live listener.
+- **Setup page typo and a dead button.** `~/poketmind` → `~/pocketmind`; "Start
+  service" only brought Termux to the foreground without running `start.sh`, and
+  now actually invokes `startAgent`.
+- **Frontend bundle targeted ES2020, which could white-screen older WebViews.**
+  The build target is now `es2017`.
+- **Incomplete `native.ts` bridge declarations.** Added
+  `notify/readToken/getRepoUrl/deployAgent/startAgent/checkAgain/openFdroid`, all
+  of which degrade safely outside the shell.
+- **APK manifest hardening.** `allowBackup=false` (tokens stay out of cloud
+  backups), `usesCleartextTraffic=false` (plaintext only for `127.0.0.1`), cutout
+  attributes moved to `values-v27` (so minSdk 26 no longer raises NewApi),
+  `values-v35` forces edge-to-edge on exit, and `registerReceiver` passes the
+  non-exported flag — `lintDebug` went from 2 errors to 0.
+
+### Added — Android delivery
+
+- `smoke/p32_android_delivery_test.py` (22 checks): loopback auth, timezone,
+  port self-check, `start.sh` argument parsing.
+- `tests/check_version.py`: three-location version consistency gate.
+- `scripts/build-apk.sh`: one-command build with artifact verification.
+- `agentd/web/src/components/TokenGate.tsx`: first-screen token entry.
+
+### Documentation — Android delivery
+
+- `docs/audit-2026-10-29.md`: the complete issue ledger (22 items, grades A/B/C).
+- Install times corrected to "10–30 min on a phone / ~50 min on an emulator"
+  (the previous "3–8 min" was off by an order of magnitude against the project's
+  own measurements).
+- Tool count corrected 31 → 41, test suites 33 → 39.
 
 ## [1.2.0] - 2026-10-24
 
@@ -166,8 +247,6 @@
 - E2E 数据目录改为每轮 `mkdtemp` 并在 `global-teardown.ts` 删除：此前每跑一次 E2E
   就永久留下一个 `/tmp/agentd-e2e-*`（本机实测累积了十几个）。
 - GitHub 镜像恢复 CI 工作流与 Dependabot 配置（主仓库仍在 GitCode，本地门禁为权威路径）。
-
-
 
 ### 修复
 

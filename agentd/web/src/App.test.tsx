@@ -63,4 +63,51 @@ describe("App 冒烟测试", () => {
     render(<App />);
     expect(await screen.findByText("已就绪")).toBeInTheDocument();
   });
+
+  // 回归：审批卡是独立于 messages 的 state。自动滚动原先只依赖 messages，
+  // 卡片渲染后把内容推高却不重新滚动，导致「允许一次」等决策键落到输入框下面
+  // （实测 1280×900 完全不可见，用户以为 Agent 卡住）。锁住「审批卡出现也会滚到底」。
+  it("审批卡出现时会把消息区滚到底", async () => {
+    const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, "scrollHeight", "get");
+    scrollHeightSpy.mockReturnValue(1200);
+    const clientHeightSpy = vi.spyOn(HTMLElement.prototype, "clientHeight", "get");
+    clientHeightSpy.mockReturnValue(400);
+    try {
+      const { rerender } = render(<App />);
+      await screen.findByText("口袋智灵");
+
+      // 先有消息：滚动逻辑进入「有消息」分支
+      useAgentStore.setState({
+        messages: [{ id: "1", role: "user", parts: [{ type: "text", text: "hi" }], done: true }],
+      });
+      rerender(<App />);
+      await Promise.resolve();
+
+      const chat = document.querySelector(".chat") as HTMLElement;
+      expect(chat).toBeTruthy();
+      chat.scrollTop = 0;
+
+      // 再让审批卡出现：长度变化必须触发重新滚动
+      useAgentStore.setState({
+        pendingApprovals: [
+          {
+            session_id: "s",
+            tool_call_id: "c",
+            name: "send_notification",
+            summary: "x",
+            risk: "write",
+            remaining: 100,
+            timeout: 120,
+          },
+        ],
+      });
+      rerender(<App />);
+      await Promise.resolve();
+
+      expect(chat.scrollTop).toBe(1200);
+    } finally {
+      scrollHeightSpy.mockRestore();
+      clientHeightSpy.mockRestore();
+    }
+  });
 });

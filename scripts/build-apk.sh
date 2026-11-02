@@ -21,51 +21,89 @@ cd "$SHELL_DIR"
 need() { command -v "$1" >/dev/null 2>&1 || { echo "缺少 $1：$2" >&2; exit 2; }; }
 need java "安装 JDK 17+（Termux 外构建不需要 Android Studio）"
 
-if [ -z "${ANDROID_HOME:-}${ANDROID_SDK_ROOT:-}" ]; then
-  if [ -f local.properties ] && grep -q "sdk.dir=" local.properties; then
-    echo "使用 local.properties 里的 sdk.dir"
-  else
-    echo "未设置 ANDROID_HOME/ANDROID_SDK_ROOT，且没有 local.properties。" >&2
-    echo "先安装 Android SDK（commandline-tools + platforms;android-35 + build-tools;35.0.0），" >&2
-    echo "然后：echo 'sdk.dir=/path/to/android-sdk' > termux/apk-shell/local.properties" >&2
-    exit 2
-  fi
+if [ -z "${ANDROID_HOME:-}${ANDROID_SDK_ROOT:-}" ] && [ ! -f local.properties ]; then
+  echo "未设置 ANDROID_HOME/ANDROID_SDK_ROOT，且没有 local.properties。" >&2
+  exit 2
 fi
 
 # wrapper 优先（版本锁定），缺失时回退系统 gradle
-if [ -x ./gradlew ]; then
-  GRADLE="./gradlew"
+if [ -f ./gradlew ]; then
+  GRADLE=(bash ./gradlew)
 else
-  GRADLE="gradle"
+  GRADLE=(gradle)
   echo "警告：gradlew 缺失（正常仓库里应有 wrapper jar），回退系统 gradle"
 fi
 
+[ "$#" -le 1 ] || { echo "参数过多" >&2; exit 2; }
 case "${1:-}" in
   --lint)
-    "$GRADLE" lintDebug --no-daemon
+    "${GRADLE[@]}" lintDebug --no-daemon
+    exit 0
     ;;
   --release)
-    "$GRADLE" assembleRelease --no-daemon
+    task=assembleRelease
+    variant=release
     ;;
-  *)
-    "$GRADLE" assembleDebug --no-daemon
+  "")
+    task=assembleDebug
+    variant=debug
     ;;
+  *) echo "未知参数：$1" >&2; exit 2 ;;
 esac
 
-echo ""
-echo "== 产物 =="
-find app/build/outputs/apk -name "*.apk" -exec ls -lh {} \;
+sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+if [ -z "$sdk" ]; then
+  need jshell "安装包含 jshell 的 JDK 17+"
+  sdk=$(printf '%s\n' 'var p = new java.util.Properties(); try (var in = new java.io.FileInputStream("local.properties")) { p.load(in); }' 'System.out.print(p.getProperty("sdk.dir", ""));' '/exit' | jshell --feedback silent)
+  [ -n "$sdk" ] || { echo "local.properties 缺少有效的 sdk.dir" >&2; exit 2; }
+fi
+BT="$sdk/build-tools/35.0.0"
+tool_path() {
+  local candidate
+  for candidate in "$BT/$1" "$BT/$1.exe" "$BT/$1.bat"; do
+    if [ -x "$candidate" ] || { [[ "$candidate" == *.bat ]] && [ -f "$candidate" ]; }; then
+      printf '%s\n' "$candidate"; return 0
+    fi
+  done
+  echo "缺少 Android 构建工具：$BT/$1" >&2
+  return 1
+}
+apksigner=$(tool_path apksigner)
+zipalign=$(tool_path zipalign)
+aapt=$(tool_path aapt)
 
-APK="app/build/outputs/apk/debug/app-debug.apk"
-if [ -f "$APK" ] && [ -n "${ANDROID_HOME:-}" ]; then
-  BT="$ANDROID_HOME/build-tools/35.0.0"
-  if [ -x "$BT/apksigner" ]; then
-    echo ""
-    echo "== 签名校验 =="
-    "$BT/apksigner" verify --print-certs "$APK" | head -3
+if [ "$variant" = debug ]; then
+  APK=app/build/outputs/apk/debug/app-debug.apk
+  rm -f "$APK"
+else
+  unsigned=app/build/outputs/apk/release/pocketmind-shell-release-unsigned.apk
+  signed=app/build/outputs/apk/release/app-release.apk
+  rm -f "$unsigned" "$signed"
+fi
+"${GRADLE[@]}" "$task" --no-daemon
+
+if [ "$variant" = release ]; then
+  if [ -f "$unsigned" ] && [ ! -e "$signed" ]; then
+    APK="$unsigned"
+  elif [ -f "$signed" ] && [ ! -e "$unsigned" ]; then
+    APK="$signed"
+  else
+    echo "release APK 缺失或存在多个候选产物" >&2
+    exit 1
   fi
 fi
+[ -s "$APK" ] || { echo "APK 缺失或为空：$APK" >&2; exit 1; }
+version_name=$(grep '^POCKET_VERSION_NAME=' gradle.properties | cut -d= -f2-)
+version_code=$(grep '^POCKET_VERSION_CODE=' gradle.properties | cut -d= -f2-)
+[ -n "$version_name" ] && [ -n "$version_code" ] || { echo "缺少 APK 版本配置" >&2; exit 1; }
+badging=$("$aapt" dump badging "$APK")
+[[ "$badging" == *"versionName='$version_name'"* && "$badging" == *"versionCode='$version_code'"* ]] || { echo "APK 版本不匹配" >&2; exit 1; }
 
-echo ""
-echo "安装到手机：adb install -r $APK"
-echo "（APK 只是壳，手机端仍需先部署后端：Termux 里 bash termux/install.sh && bash termux/start.sh）"
+if [ "$variant" = release ] && [ "$APK" = "$unsigned" ]; then
+  echo "未签名 release 中间制品（不可作为正式发布或直接安装）：$APK"
+else
+  "$apksigner" verify --print-certs "$APK"
+  "$zipalign" -c 4 "$APK"
+  echo "已校验 APK：$APK"
+  echo "安装到手机：adb install -r $APK"
+fi

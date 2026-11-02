@@ -160,7 +160,10 @@ export default function App() {
       return;
     }
     if (!pinnedUp) el.scrollTop = el.scrollHeight;
-  }, [messages, pinnedUp, tab]);
+    // 审批卡是独立于 messages 的状态：它渲染在最后一条消息之后，把内容整体推高。
+    // 只在 messages 变化时滚动会让卡片落到输入框下面（实测 1280×900 下「允许一次」
+    // 等 5 个决策键完全不可见，用户以为 Agent 卡住）。这里在卡片出现/消失后再滚一次。
+  }, [messages, pinnedUp, tab, pendingApprovals.length]);
 
   if (needToken) return <TokenGate onDone={onTokenSubmitted} />;
 

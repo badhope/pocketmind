@@ -30,9 +30,24 @@ STUB_EOF
 EOF
   chmod +x "$DIR/$name"
   if [ "$IS_WINDOWS" = 1 ]; then
-    printf '@echo off
-%s
-' "$output" > "$DIR/$name.cmd"
+    # .cmd 垫片必须用 echo 输出固定 JSON。原实现把 JSON 裸写在 `@echo off` 之后，
+    # cmd.exe 会把它当成命令去执行（`{"status":` 不是合法命令），于是 stderr 是
+    # GBK 编码的中文报错 —— 按 UTF-8 解码就变成 `����`，工具被判失败、界面报乱码。
+    # 用 @echo 前缀逐行输出，并声明 chcp 65001 让输出走 UTF-8。
+    {
+      printf '@echo off\r\n'
+      printf 'chcp 65001 >nul\r\n'
+      while IFS= read -r line; do
+        # 转义 cmd 的特殊字符（% 需写成 %%，^ & | < > 需加 ^）
+        escaped=${line//%/%%}
+        escaped=${escaped//^/^^}
+        escaped=${escaped//&/^&}
+        escaped=${escaped//|/^|}
+        escaped=${escaped//</^<}
+        escaped=${escaped//>/^>}
+        printf 'echo %s\r\n' "$escaped"
+      done <<< "$output"
+    } > "$DIR/$name.cmd"
   fi
 }
 

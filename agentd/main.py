@@ -50,7 +50,7 @@ def _sse_event(ev: dict) -> ServerSentEvent:
     return ServerSentEvent(data=json.dumps(ev, ensure_ascii=False), sep="\n")
 
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 APP_NAME = "口袋智灵"
 
 DIST = Path(__file__).parent / "web" / "dist"

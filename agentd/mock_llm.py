@@ -46,6 +46,27 @@ def _stream_text(text: str):
     yield from tokens
 
 
+def _tool_failed(message: dict) -> bool:
+    """判断一条 tool 角色消息代表的是失败还是成功。
+
+    工具结果以 JSON 文本存放在 content 里，成功约定是 {"ok": true, ...}，
+    失败是 {"ok": false, "error": "..."}。另外 meta.status == "failed" 表示
+    执行层（审批拒绝 / 超时 / 异常）已经判定失败，优先级高于内容解析。
+    解析不出来时按成功处理——宁可少报失败，也不要误报。
+    """
+    meta = message.get("meta")
+    if isinstance(meta, dict) and meta.get("status") == "failed":
+        return True
+    raw = message.get("content")
+    if not isinstance(raw, str) or not raw.strip():
+        return False
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return isinstance(data, dict) and data.get("ok") is False
+
+
 class MockLLM:
     def __init__(self, settings: dict):
         self.settings = settings
@@ -96,10 +117,20 @@ class MockLLM:
         return None
 
     async def chat(self, messages: list[dict], tools: list[dict] | None):
-        last_user = next(
-            (str(m.get("content") or "") for m in reversed(messages) if m["role"] == "user"), ""
+        last_user_idx = next(
+            (i for i in range(len(messages) - 1, -1, -1) if messages[i].get("role") == "user"),
+            None,
         )
-        has_tool_result = any(m["role"] == "tool" for m in messages)
+        if last_user_idx is None:
+            # 没有用户消息：mock 无话可说，回一段固定文本而不是崩溃。
+            for tok in _stream_text("（mock 模式）没有收到用户消息。"):
+                yield _Chunk(_Delta(content=tok))
+            return
+
+        last_user = str(messages[last_user_idx].get("content") or "")
+        # 只关心「本轮用户消息之后」是否已有工具结果。原实现扫描整段历史，
+        # 导致同一会话的第二次提问永远拿不到工具调用（mock 只能演示第一轮）。
+        has_tool_result = any(m.get("role") == "tool" for m in messages[last_user_idx + 1:])
 
         if not has_tool_result and tools:
             matched = self._match_tool(last_user)
@@ -108,16 +139,34 @@ class MockLLM:
                 # 先输出思考过程
                 for tok in _stream_text(f"需要调用 {name} 来回答这个问题。"):
                     yield _Chunk(_Delta(reasoning=tok))
-                # 再发出 tool call
-                yield _Chunk(_Delta(tool_calls=[_tool_call(0, "call_mock_1", name, args)]))
+                # 再发出 tool call。id 用「本轮是第几个用户消息」推导：
+                # 首轮恒为 call_mock_1（回归套件依赖该值），后续轮次递增，
+                # 保证同一会话不同轮的审批卡不会在 `session_id:tool_call_id`
+                # 去重里互相吞掉。不能用实例计数器——`Agent._llm()` 每次调用都
+                # 新建一个 MockLLM，实例状态活不过一次 chat()。
+                turn = sum(1 for m in messages[: last_user_idx + 1] if m.get("role") == "user")
+                yield _Chunk(_Delta(tool_calls=[_tool_call(0, f"call_mock_{max(turn, 1)}", name, args)]))
                 return
 
         if has_tool_result:
-            reply = (
-                "工具已执行完毕（mock 演示）：结果已返回并回填。"
-                "这条消息说明「流式输出 → 工具调用 → 审批 → 结果回填」链路是通的，"
-                "配置真实 LLM 后我会真正干活。"
-            )
+            # 必须区分「工具真的成功」和「工具失败了」。原实现无条件说
+            # 「工具已执行完毕…链路是通的」——工具返回 {"ok": false} 时这是虚假成功，
+            # 用户在演示里看到红色的失败卡片、下面却写"执行完毕"，比不回复更误导。
+            tool_msgs = [m for m in messages[last_user_idx + 1:] if m.get("role") == "tool"]
+            last_tool = tool_msgs[-1] if tool_msgs else {}
+            failed = _tool_failed(last_tool)
+            if failed:
+                reply = (
+                    "工具没有执行成功：结果里返回了失败。"
+                    "这通常是设备缺少 termux-api 子命令、权限被拒，或参数不被接受。"
+                    "展开上面的工具卡片可以看到具体错误；修好后重发这条请求即可。"
+                )
+            else:
+                reply = (
+                    "工具已执行完毕（mock 演示）：结果已返回并回填。"
+                    "这条消息说明「流式输出 → 工具调用 → 审批 → 结果回填」链路是通的，"
+                    "配置真实 LLM 后我会真正干活。"
+                )
             for tok in _stream_text(reply):
                 yield _Chunk(_Delta(content=tok))
             return

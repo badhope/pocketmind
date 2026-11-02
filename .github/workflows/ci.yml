@@ -110,26 +110,18 @@ jobs:
         run: |
           sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
+      - name: Unit tests (Robolectric)
+        working-directory: termux/apk-shell
+        run: bash ./gradlew testDebugUnitTest --no-daemon --stacktrace
+
       - name: Lint (fails on errors)
-        working-directory: termux/apk-shell
-        run: ./gradlew lintDebug --no-daemon --stacktrace
+        run: bash scripts/build-apk.sh --lint
 
-      - name: Assemble debug + release APK
-        working-directory: termux/apk-shell
-        run: ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace
+      - name: Build + verify debug APK
+        run: bash scripts/build-apk.sh
 
-      - name: Verify APK (signature + alignment + manifest)
-        working-directory: termux/apk-shell
-        run: |
-          set -e
-          APK=app/build/outputs/apk/debug/app-debug.apk
-          test -f "$APK"
-          BT="$ANDROID_HOME/build-tools/35.0.0"
-          "$BT/apksigner" verify --print-certs "$APK"
-          "$BT/zipalign" -c -v 4 "$APK" >/dev/null
-          "$BT/aapt" dump badging "$APK" | head -5
-          # 版本号必须与后端一致（tests/check_version.py 已校验，这里再核 APK 内部值）
-          "$BT/aapt" dump badging "$APK" | grep -q "versionName='$(grep POCKET_VERSION_NAME gradle.properties | cut -d= -f2)'"
+      - name: Build release APK (unsigned without keystore)
+        run: bash scripts/build-apk.sh --release
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4

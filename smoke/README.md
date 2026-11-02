@@ -27,6 +27,7 @@ bash tests/run_all.sh --backend  # 只跑后端（本目录的所有套件都包
 | `p29_stats_usage_test.py` | /api/stats 真数据（metrics 快照）、token 计数（prompt/completion/total）、done 事件 usage、Prometheus token 指标 | 15 |
 | `p30_features_test.py` | 会话置顶排序、只改 pinned 不清标题、定时任务立即执行、导出→导入恢复、重复导入幂等、坏备份 400 | 22 |
 | `p31_openai_compat_test.py` | 真实 OpenAI 兼容链路（不用 MockLLM）：本地 HTTP 端点、流式文本、工具调用分片拼接、usage 尾帧、`stream_options` 被拒时降级重试 | 14 |
+| `p33_mock_multiturn_test.py` | Mock 多轮工具调用：同一会话第二轮仍触发工具（原实现扫描全历史，导致只能演示第一轮）、调用 id 逐轮唯一（避免审批卡按 `session:tool_call` 去重互吞）、本轮已有结果时收尾、无 user 消息不崩、普通提问不误触发 | 12 |
 | `p4_agent_depth_test.py` | P4 agent 深度：配置接线（链长/重试/检索条数/压缩阈值/FTS 批量）、中断恢复（孤立 tool_calls 回填）、三级审批（deny_always/allow_global/旧格式兼容）、MCP 注解分级、档案记忆注入、知识库显式检索、摘要链路（最旧 N 条不摘最近）、Skills 渐进披露、todo 工具 | 53 |
 | `p5_frontend_contract_test.py` | P5 前端契约：导出覆盖档案/清单/知识库、agent/context/memory 三块设置回环与越界收敛、新工具分组齐备、手动压缩端点 | 18 |
 | `p6_unconfigured_test.py` | P6 首次使用（未配置模型）：自起真实模式服务，断言 health 给出缺失项、发消息 5 秒内返回指引、连续两条都处理（不被永久锁成「排队」）、历史留完整一问一答 | 8 |
