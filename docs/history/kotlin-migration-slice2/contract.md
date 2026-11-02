@@ -39,7 +39,7 @@ Slice 2 只交付「可信启动路径 + 失败回退 + 诚实的接口清单」
 
 # 迁移参照（Slice 1）
 
-本文件冻结现有接口的迁移参照，不表示 Kotlin 服务已经实现。完整端点和字段以 [API.md](API.md)、`agentd/main.py` 和 `agentd/web/src/api.ts` 为准；`tests/test_kotlin_contract_reference.py` 与 Android 单测共用 `contract-vectors.properties`。
+本文件冻结现有接口的迁移参照，不表示 Kotlin 服务已经实现。完整端点和字段以 [API.md](../../API.md)、`agentd/main.py` 和 `agentd/web/src/api.ts` 为准；`tests/test_kotlin_contract_reference.py` 与 Android 单测共用 `contract-vectors.properties`。
 
 - REST：健康检查 `GET /api/health` 无需 token，返回 `ok`、`ready`、`components`；其他 API 的现有认证与同源策略见 API.md。`POST /api/chat` 接收 `message` 和可选 `session_id`；工具清单 `GET /api/tools` 返回 `tools` 和 `count`，工具包含 `name`、`description`、`risk`、`summary`、`timeout`、`group`。
 - SSE：聊天使用 `text/event-stream`，`data: <json>\n\n` 帧；事件类型、字段和可选 `done.usage` 见 API.md 与前端 `ChatEvent`。不要把未来实现的行为当作当前服务能力。

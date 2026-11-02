@@ -1,6 +1,6 @@
 # Archived: Kotlin native runtime (Slice 1–2)
 
-**Status:** archived experiment, not shipped. See [ROADMAP.md](../../ROADMAP.md).
+**Status:** archived experiment, not shipped. See [ROADMAP.md](../../../ROADMAP.md).
 
 This directory preserves, verbatim and unmodified, the Kotlin migration work that
 was developed on the branch `feature/kotlin-migration-slice1` and never committed

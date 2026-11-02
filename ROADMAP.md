@@ -3,7 +3,7 @@
 Status legend: **shipped** · **in progress** · **planned** · **exploring**
 
 This roadmap states what is real today and what is deliberately not built yet.
-Items move into [CHANGELOG.md](../CHANGELOG.md) when they ship.
+Items move into [CHANGELOG.md](CHANGELOG.md) when they ship.
 
 ## Now — 1.2.x (current)
 
