@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import AsyncExitStack
+from typing import Any
 
 
 def tool_schema(tool) -> dict:
@@ -94,7 +95,7 @@ class MCPClient:
         # AsyncExitStack 负责长期持有 stdio_client 与 ClientSession 两个异步上下文，
         # 使连接在整个应用生命周期内保持打开，而不是每次调用都重连。
         self._stack: AsyncExitStack | None = None
-        self._session = None
+        self._session: Any = None  # ClientSession，connect() 成功后回填；SDK 存根缺陷，Any 规避
 
     async def connect(self) -> list[dict]:
         """启动子进程并完成 initialize 握手；返回 tools/list 结果（dict 形状）。"""
@@ -104,7 +105,12 @@ class MCPClient:
         params = StdioServerParameters(command=self.command, args=list(self.args))
         self._stack = AsyncExitStack()
         read, write = await self._stack.enter_async_context(stdio_client(params))
-        self._session = await self._stack.enter_async_context(ClientSession(read, write))
+        # mcp SDK 存根缺陷：ClientSession.__aenter__ 实际返回自身（ClientSession），
+        # 存根却声明为 None，导致 AsyncExitStack.enter_async_context 推断为「不返回值」；
+        # 运行时 await 结果就是可用的 session
+        self._session = await self._stack.enter_async_context(
+            ClientSession(read, write)  # type: ignore[arg-type, func-returns-value]  # 三方 SDK 泛型缺陷
+        )
         # 官方 SDK 在此完成协议版本协商 / 能力交换
         await self._session.initialize()
         result = await self._session.list_tools()

@@ -19,6 +19,7 @@ import re
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
@@ -923,24 +924,28 @@ class Store:
             try:
                 assert self._conn is not None
                 match = " OR ".join(self._fts_phrase(w) for w in words)
-                rows = (await self._conn.execute(text(
+                # fetchall() 返回 Sequence[Row]，非 list；list() 转换以匹配 rows: list 标注
+                rows = list((await self._conn.execute(text(
                     "SELECT k.id, k.title, k.content, k.created_at FROM knowledge_fts f "
                     "JOIN knowledge k ON k.id = f.rowid WHERE knowledge_fts MATCH :m LIMIT :l"
-                ), {"m": match, "l": max(1, int(limit))})).fetchall()
+                ), {"m": match, "l": max(1, int(limit))})).fetchall())
             # aqg: top-level boundary —— 失败仅降级本能力
             except Exception:  # noqa: BLE001 —— FTS 异常回退 LIKE
                 rows = []
         if not rows:
             assert self._conn is not None
-            conds, args = [], {}
+            # args 既有 str 又有 int 值，显式标注 dict[str, Any] 避免被推断成 dict[str, str]
+            conds: list[str] = []
+            args: dict[str, Any] = {}
             for i, w in enumerate(words):
                 conds.append(f"(content LIKE :w{i} OR title LIKE :w{i})")
                 args[f"w{i}"] = f"%{w}%"
             args["l"] = max(1, int(limit))
-            rows = (await self._conn.execute(text(
+            # fetchall() 返回 Sequence[Row]，非 list；list() 转换以匹配 rows: list 标注
+            rows = list((await self._conn.execute(text(
                 "SELECT id, title, content, created_at FROM knowledge WHERE "
                 + " OR ".join(conds) + " ORDER BY id DESC LIMIT :l"
-            ), args)).fetchall()
+            ), args)).fetchall())
         return [dict(r._mapping) for r in rows]
 
     async def kb_list(self) -> list[dict]:
@@ -960,37 +965,75 @@ class Store:
         return cur.rowcount > 0
 
     async def search_messages(self, query: str, limit: int = 20) -> list[dict]:
-        """跨会话全文搜索消息内容（会话抽屉的「搜索会话」升级为搜正文）。
+        """跨会话全文搜索：消息正文 + 工具输出 + 工具调用参数。
 
         为什么要它：原来前端只按**标题**过滤，而标题是自动取的前 14 个字，
         用户记得的是"当时聊到的某个结论"，标题里根本没有 —— 几十个会话之后
         等于搜不到。这里直接搜正文。
 
-        实现：优先 FTS5（messages_fts 若可用），否则 LIKE 降级；
-        两种路径都只返回摘要片段而非全文，避免把长消息整段塞给前端。
+        1.3：工具产物也纳入检索 —— 工具输出（role='tool' 的 content，如传感器
+        读数、文件内容、联网抓取的网页文本）和工具调用参数（assistant 消息
+        meta.tool_calls 里的 arguments JSON）经常才是用户要找的东西；此前
+        `role IN ('user','assistant')` 把它们全部排除在外。
+
+        每条命中带 `matched` 字段说明命中来源，前端据此打标签：
+          - "message"：消息正文命中（user/assistant 的 content）
+          - "tool_output"：工具输出命中（tool 消息的 content）
+          - "tool_call"：工具调用参数命中（assistant 消息的 meta JSON）
+        实现：LIKE 子串检索（与原实现一致，不依赖 FTS 可用性）；只返回摘要
+        片段而非全文，避免把长消息整段塞给前端。
         """
         words = [w for w in query.strip().split() if w][:6]
         if not words:
             return []
         assert self._conn is not None
+        content_conds = " OR ".join(f"m.content LIKE :w{i}" for i in range(len(words)))
+        meta_conds = " OR ".join(f"m.meta LIKE :w{i}" for i in range(len(words)))
         # 用 SQLite 的 instr 截一个窗口作为摘要（比 Python 侧切片少搬数据）
         rows = (await self._conn.execute(text(
-            "SELECT m.id, m.session_id, m.role, m.content, m.created_at, s.title "
+            "SELECT m.id, m.session_id, m.role, m.content, m.meta, m.created_at, s.title "
             "FROM messages m JOIN sessions s ON s.id = m.session_id "
-            "WHERE m.role IN ('user','assistant') AND ("
-            + " OR ".join(f"m.content LIKE :w{i}" for i in range(len(words)))
-            + ") ORDER BY m.id DESC LIMIT :l"
+            "WHERE ("
+            # 正文命中：user/assistant 消息，以及 role='tool' 的工具输出
+            "(m.role IN ('user','assistant','tool') AND (" + content_conds + ")) "
+            # 参数命中：assistant 消息的 meta JSON（tool_calls 的 arguments 序列化后存在这里）
+            "OR (m.role='assistant' AND (" + meta_conds + "))"
+            ") ORDER BY m.id DESC LIMIT :l"
         ), {**{f"w{i}": f"%{w}%" for i, w in enumerate(words)}, "l": max(1, min(limit, 50))})).fetchall()
 
         out = []
         for r in rows:
             d = dict(r._mapping)
+            meta = d.pop("meta") or ""
             content = d.pop("content") or ""
             low = content.lower()
+            # 命中来源判定：tool 行必然是工具输出；否则先看正文，正文没命中
+            # （说明命中在 meta JSON 里）归为工具调用参数。
+            if d.get("role") == "tool":
+                matched = "tool_output"
+            elif any(low.find(w.lower()) >= 0 for w in words):
+                matched = "message"
+            else:
+                matched = "tool_call"
+            # 摘要窗口优先从正文取；正文没命中时从 meta JSON 取（工具参数命中）
             pos = min((low.find(w.lower()) for w in words if low.find(w.lower()) >= 0), default=0)
-            start = max(0, pos - 30)
-            snippet = content[start:start + 120].replace("\n", " ")
-            out.append({**d, "snippet": ("…" if start else "") + snippet + ("…" if start + 120 < len(content) else "")})
+            if pos >= 0:
+                start = max(0, pos - 30)
+                snippet = content[start:start + 120].replace("\n", " ")
+                prefix = "…" if start else ""
+                suffix = "…" if start + 120 < len(content) else ""
+            else:
+                low_meta = meta.lower()
+                pos_meta = min(
+                    (low_meta.find(w.lower()) for w in words if low_meta.find(w.lower()) >= 0),
+                    default=0,
+                )
+                start = max(0, pos_meta - 30)
+                snippet = meta[start:start + 120].replace("\n", " ")
+                prefix = "…" if start else ""
+                suffix = "…" if start + 120 < len(meta) else ""
+            out.append({**d, "matched": matched,
+                        "snippet": prefix + snippet + suffix})
         return out
 
     # ---------- 相关历史记忆（P1：跨会话回忆） ----------
@@ -1001,7 +1044,9 @@ class Store:
 
     async def _like_search(self, words: list[str], limit: int, exclude_session: str | None) -> list:
         """旧版 LIKE 子串检索：作为 FTS 不可用 / 未命中时的降级路径。"""
-        conds, args = [], {}
+        # args 既有 str 又有 int 值，显式标注 dict[str, Any] 避免被推断成 dict[str, str]
+        conds: list[str] = []
+        args: dict[str, Any] = {}
         for i, w in enumerate(words):
             conds.append(f"content LIKE :w{i}")
             args[f"w{i}"] = f"%{w}%"
@@ -1017,7 +1062,8 @@ class Store:
         sql += " ORDER BY created_at DESC LIMIT :l"
         args["l"] = limit
         assert self._conn is not None
-        return (await self._conn.execute(text(sql), args)).fetchall()
+        # fetchall() 返回 Sequence[Row]，标注为 list，list() 转换
+        return list((await self._conn.execute(text(sql), args)).fetchall())
 
     async def search_memories(self, query: str, limit: int = 3, exclude_session: str | None = None) -> list[dict]:
         """按关键词检索此前对话摘要。
@@ -1043,7 +1089,8 @@ class Store:
                     args["ex"] = exclude_session
                 sql += " ORDER BY created_at DESC LIMIT :l"
                 args["l"] = limit
-                rows = (await self._conn.execute(text(sql), args)).fetchall()
+                # fetchall() 返回 Sequence[Row]，非 list；list() 转换以匹配 rows: list 标注
+                rows = list((await self._conn.execute(text(sql), args)).fetchall())
             # aqg: top-level boundary —— FTS 查询异常回退 LIKE，检索能力降级但不失败
             except Exception:  # noqa: BLE001 —— FTS 查询异常则回退 LIKE
                 rows = []

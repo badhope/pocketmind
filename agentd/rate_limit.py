@@ -21,6 +21,9 @@ ASGI 中间件挂在所有端点上，行为等价（超限返回 429）。
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import cast
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from slowapi import Limiter
@@ -50,7 +53,12 @@ class ExemptRateLimitMiddleware(SlowAPIMiddleware):
 def mount_rate_limit(app: FastAPI, default_limits: list[str] | None = None) -> Limiter:
     """挂载限流中间件与异常处理器。"""
     limits = default_limits or ["120/minute"]
-    limiter = Limiter(key_func=get_remote_address, default_limits=limits)
+    # slowapi 把 default_limits 标成 list[str | Callable[..., str]]，list 不变型导致
+    # list[str] 无法直接传入；运行时只会传字符串列表，cast 仅做类型收窄、零行为变更。
+    limiter = Limiter(
+        key_func=get_remote_address,
+        default_limits=cast("list[str | Callable[..., str]]", limits),
+    )
     app.state.limiter = limiter
     app.add_middleware(ExemptRateLimitMiddleware)
 

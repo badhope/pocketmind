@@ -21,7 +21,7 @@ import os
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -50,8 +50,15 @@ def _sse_event(ev: dict) -> ServerSentEvent:
     return ServerSentEvent(data=json.dumps(ev, ensure_ascii=False), sep="\n")
 
 
-VERSION = "1.2.1"
+VERSION = "1.3.0"
 APP_NAME = "口袋智灵"
+
+# 导出格式版本（/api/export 的 format_version 字段）。
+# 只在「读取语义发生变化、旧版导入器会误解数据」时递增；纯增量字段（新增顶层键）
+# 不需要递增 —— 导入端对未知键一律忽略，旧备份也能导入新版本。
+# 导入规则：缺失视为 1（历史备份没有这个字段）；大于当前值 → 400，
+# 提示先升级本机，绝不把更高版本的备份「猜」着导进去。
+EXPORT_FORMAT_VERSION = 1
 
 DIST = Path(__file__).parent / "web" / "dist"
 
@@ -133,6 +140,9 @@ async def run_agent(session_id: str, message: str) -> None:
     _notify_bg("口袋智灵", f"正在处理：{message[:40]}", persistent=True)
     agent = None
     try:
+        # store 在 lifespan 启动时创建，本函数只会于服务就绪后被调用；
+        # assert 仅做 None 收窄（mypy），运行时恒为真
+        assert store is not None
         # 未配置模型时快速失败并给出明确指引：否则 AsyncOpenAI 会拿默认 base_url
         # 打 api.openai.com 并重试，用户要对着「正在思考…」干等十几分钟才看到报错。
         # 注意必须放在 try 内：提前 return 也要走 finally（runs.pop + 续跑排队消息），
@@ -230,6 +240,8 @@ async def run_agent(session_id: str, message: str) -> None:
         # cancel_run 拿不到旧 run 也就没置 cancelled —— 此时必须复查会话还在，
         # 否则续跑任务会往已删会话写消息。
         if pending and not cancelled:
+            # finally 块不继承 try 内 assert 的收窄（异常可能在 assert 前抛出），需独立收窄
+            assert store is not None
             still_exists = await store.get_session(session_id) is not None
         else:
             still_exists = False
@@ -259,6 +271,8 @@ async def run_agent_for_job(session_id: str, message: str) -> None:
     会话不存在时自动新建；执行结果写入该会话，可在前端回看。之所以做成模块级顶层
     函数而非闭包，是因为它会被 APScheduler 的可 pickle 回调链路触达。
     """
+    # store 在 lifespan 启动时创建；assert 仅做 None 收窄（mypy），运行时恒为真
+    assert store is not None
     if not session_id or await store.get_session(session_id) is None:
         session_id = await store.create_session()
     # 必须用 _new_run()：这里此前是手写字面量且少了 "cancelled" 字段，靠
@@ -1303,6 +1317,9 @@ def create_app() -> FastAPI:
         out: dict = {
             "app": "口袋智灵",
             "version": VERSION,
+            # 备份格式版本：导入端据此判断「这份备份我认识吗」。
+            # 缺失 = 历史备份，按 1 处理；大于当前值 = 新版本备份，导入端必须拒绝。
+            "format_version": EXPORT_FORMAT_VERSION,
             "exported_at": datetime.datetime.now().isoformat(timespec="seconds"),
             "settings": {
                 "permission_mode": settings_mgr.get().get("permission_mode", "approve"),
@@ -1373,6 +1390,19 @@ def create_app() -> FastAPI:
             raise HTTPException(503, "服务未就绪")
         if not isinstance(payload, dict):
             raise HTTPException(400, "备份文件必须是 JSON 对象")
+        # 格式版本校验：在读任何数据之前先确认「这份备份我认识」。
+        # 缺失视为 1（历史备份没有 format_version 字段）；
+        # 未来版本（format_version > 当前）的备份可能带本版不理解的结构，
+        # 猜着导入会写坏数据，必须明确拒绝并指路升级。
+        fmt = payload.get("format_version", 1)
+        if isinstance(fmt, bool) or not isinstance(fmt, int) or fmt < 1:
+            raise HTTPException(400, f"format_version 必须是正整数，实际是 {fmt!r}")
+        if fmt > EXPORT_FORMAT_VERSION:
+            raise HTTPException(
+                400,
+                f"备份格式版本过新（{fmt} > 当前支持 {EXPORT_FORMAT_VERSION}）："
+                "请先把本机 PocketMind 升级到与备份同版本再导入",
+            )
         sessions = payload.get("sessions")
         if not isinstance(sessions, list):
             raise HTTPException(400, "备份文件缺少 sessions 数组（不是 PocketMind 的导出文件？）")
@@ -1565,7 +1595,9 @@ def _rebuild_app_for_home() -> None:
     approval = ApprovalCenter(timeout_cb=_approval_timeout, persist_path=_approval_always_path())
     app = create_app()
     import sys
-    sys.modules[__name__].app = app
+    # 把重建后的 app 暴露为模块属性（供 uvicorn 动态引用）；ModuleType 未声明
+    # 该属性，cast 为 Any 仅做类型收窄，运行时 cast 是恒等调用、零行为变更
+    cast(Any, sys.modules[__name__]).app = app
 
 
 def main():

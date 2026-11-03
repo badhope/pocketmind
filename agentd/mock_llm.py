@@ -68,11 +68,13 @@ def _tool_failed(message: dict) -> bool:
 
 
 class MockLLM:
-    def __init__(self, settings: dict):
+    def __init__(self, settings) -> None:
+        # settings 参数实际接收 Agent 的 Settings 对象（当前未消费，仅保留引用），
+        # 不标 dict：调用方传的是 Settings 而非裸 dict
         self.settings = settings
         # (匹配模式, 工具名, 参数)：支持 str（含.Contains）或 compiled regex
         # 顺序即优先级；第一个命中的工具被调用
-        self._TOOLS: list[tuple, str, dict] = [
+        self._TOOLS: list[tuple[str | re.Pattern[str], str, dict]] = [
             ("电池", "get_battery", {}),
             ("短信", "read_sms", {"limit": 5}),
             (re.compile(r"定位|位置|在哪"), "get_location", {"provider": "network"}),

@@ -6,6 +6,7 @@ import { Composer } from "./components/Composer";
 import { EmptyState } from "./components/EmptyState";
 import { IconChevron, IconGear, IconSessions } from "./components/icons";
 import { MessageItem } from "./components/MessageItem";
+import { OnboardingWizard, onboardingDismissed } from "./components/OnboardingWizard";
 import { PendingApprovalBanner } from "./components/PendingApprovalBanner";
 import { PocketLogo } from "./components/PocketLogo";
 import { TokenGate } from "./components/TokenGate";
@@ -81,6 +82,18 @@ export default function App() {
 
   const [tab, setTab] = useState<TabKey>("chat");
   const [draft, setDraft] = useState<string | undefined>(undefined);
+  // 首次运行引导：后端已连通但模型未配置时弹一次（localStorage 记住「已完成/跳过」）。
+  // 离线演示模式（mock）与令牌锁屏不弹；连接还没建立时不弹（等 health 的结论）。
+  const [showOnboard, setShowOnboard] = useState(false);
+  useEffect(() => {
+    if (mock || needToken || connectionStatus !== "connected") return;
+    // 模型已配置（或用户早已完成/跳过）：向导若开着就收起（health 异步恢复就绪的瞬间）
+    if (ready || onboardingDismissed()) {
+      setShowOnboard(false);
+      return;
+    }
+    setShowOnboard(true);
+  }, [mock, needToken, connectionStatus, ready]);
 
   const approvalTimeout =
     Number((settings?.server as { approval_timeout?: number } | undefined)?.approval_timeout) || 120;
@@ -334,6 +347,16 @@ export default function App() {
         onChange={setTab}
         badge={{ tasks: pendingApprovals.length }}
       />
+
+      {showOnboard && (
+        <OnboardingWizard
+          onDone={() => {
+            setShowOnboard(false);
+            // 配置保存后立刻重新拉一次 health，状态灯从「未配置」翻成「已就绪」
+            void init();
+          }}
+        />
+      )}
 
       {showSessions && (
         <Suspense fallback={<LazyFallback />}>

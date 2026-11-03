@@ -14,6 +14,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -75,7 +76,9 @@ PRESETS = [
     },
 ]
 
-DEFAULTS = {
+# 显式标注 dict[str, Any]：DEFAULTS 的值异构（dict/str/bool 混合），
+# 不标注会被 mypy 推断成 Collection[str]，导致所有 DEFAULTS.get(...) 当 dict 用时报错。
+DEFAULTS: dict[str, Any] = {
     "llm": {
         "provider": "custom",
         "base_url": "",

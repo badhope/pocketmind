@@ -11,6 +11,45 @@ Release mechanics are documented in [docs/VERSIONING.md](docs/VERSIONING.md).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-03
+
+### Added
+
+- **First-run onboarding wizard.** When the backend is reachable but no model is
+  configured, a three-step wizard walks through provider preset → API key with a
+  real connectivity test (the next step stays locked until the test passes) →
+  permission-mode walkthrough. Skipping is always available and remembered;
+  nothing is ever forced.
+- **Session search now covers tool output.** Full-text search previously matched
+  only `user`/`assistant` message bodies. Tool results (sensor readings, file
+  contents, fetched web text) and tool-call arguments (`meta.tool_calls`
+  arguments JSON) were invisible. Each hit now carries a `matched` field —
+  `message` / `tool_output` / `tool_call` — and the session drawer shows a badge
+  for tool-originated hits.
+- **Structured tool result viewer.** List-shaped tool results
+  (`kb_search`, `kb_list`, job lists, top-level arrays) render as a compact
+  table (short flat rows) or titled cards (long content) instead of a raw JSON
+  dump. Flat key/value results and error shapes keep the existing rendering.
+- **Export format versioning.** `GET /api/export` now stamps
+  `format_version: 1`. `POST /api/import` accepts legacy bundles without the
+  field (treated as 1), rejects future versions with 400 and an upgrade hint,
+  and rejects non-integer/boolean values — never guessing its way through a
+  bundle it does not understand.
+
+### Changed
+
+- `mypy` is now clean (was a 93-error baseline) and enforced as a gate step in
+  `tests/run_all.sh`. Fixes are mostly annotation-level: platform-conditional
+  `resource` attribute access in `tools/shell.py`, `Settings` typed correctly as
+  the `Agent` constructor argument instead of `dict`, `Store | None` narrowing
+  in `main.py`, sequence types in `memory.py`, and the MCP SDK generics.
+
+### Documentation
+
+- ROADMAP 1.3.x items moved to shipped; verification-gap section updated (the
+  mypy gap is closed). API reference documents `format_version` and the new
+  search `matched` field.
+
 ## [1.2.1] - 2026-11-02
 
 ### Fixed

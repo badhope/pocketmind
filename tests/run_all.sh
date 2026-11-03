@@ -141,10 +141,15 @@ if [ "$RUN_BACKEND" = 1 ]; then
   if ! "$PY" -m ruff --version >/dev/null 2>&1; then
     echo "缺少 ruff：$PY -m pip install ruff" >&2; exit 2
   fi
+  # mypy 是 1.3.0 起的硬门禁：类型检查不通过同样阻断合入
+  if ! "$PY" -m mypy --version >/dev/null 2>&1; then
+    echo "缺少 mypy：$PY -m pip install mypy" >&2; exit 2
+  fi
   echo "  Python $("$PY" -c 'import platform;print(platform.python_version())') / ruff ok"
 
   step "compileall：全部模块可编译" "$PY" -m compileall -q agentd/ tests/ smoke/
   step "ruff：静态检查" "$PY" -m ruff check agentd/ tests/ smoke/
+  step "mypy：类型检查" "$PY" -m mypy agentd/
   step "p9 无障碍：主题文字对比度 ≥ 4.5:1" run_py smoke/p9_a11y_contrast_test.py
   step "p10 子代理（工具收窄 / 禁止嵌套 / 不污染主会话）" run_py smoke/p10_subagent_test.py
   step "p11 Termux 安装脚本幂等性" run_py smoke/p11_termux_install_test.py
@@ -170,6 +175,7 @@ if [ "$RUN_BACKEND" = 1 ]; then
   step "p33 Mock 多轮工具调用（同会话第二轮 / 调用 id 唯一 / 无 user 消息）" run_py smoke/p33_mock_multiturn_test.py
   step "p34 用户旅程（真实 HTTP：会话→工具→审批→导出导入→定时任务→删除）" run_py smoke/p34_user_journey_test.py
   step "p35 CSS 层叠守卫（通用规则不得压掉组件布局）" run_py smoke/p35_css_cascade_test.py
+  step "p36 检索与备份格式（工具输出搜索 / format_version 导入规则）" run_py smoke/p36_search_and_format_test.py
   step "版本一致性（main.py / package.json / gradle.properties）" run_py tests/check_version.py
   if [ "$WITH_DEP_AUDIT" = 1 ]; then
     step "p22 依赖漏洞扫描（OSV.dev，需外网）" run_py smoke/p22_dep_audit_test.py

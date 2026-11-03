@@ -160,7 +160,11 @@ export function SessionList({
             <ul>
               {hits.map((h) => (
                 <li key={h.id} className="hit" onClick={() => onPick(h.session_id)}>
-                  <div className="hit-title">{h.title}</div>
+                  <div className="hit-title">
+                    {h.matched === "tool_output" && <span className="hit-kind">工具输出</span>}
+                    {h.matched === "tool_call" && <span className="hit-kind">工具参数</span>}
+                    {h.title}
+                  </div>
                   <div className="hit-snippet">{h.snippet}</div>
                 </li>
               ))}

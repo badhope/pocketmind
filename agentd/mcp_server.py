@@ -24,9 +24,11 @@ import inspect
 # mcp 2.x：FastMCP 改名 MCPServer（from mcp.server.mcpserver import MCPServer）
 # 统一兼容导入，别名为 FastMCP，调用处无感。
 try:  # pragma: no cover - 取决于环境装的大版本
-    from mcp.server.fastmcp import FastMCP
+    # mcp SDK 1.x/2.x 的导出路径不同（fastmcp / mcpserver），mypy 存根只认其一；
+    # 运行时由 try/except 兜底兼容两种大版本
+    from mcp.server.fastmcp import FastMCP  # type: ignore[attr-defined]  # 三方 SDK 泛型/导出缺陷
 except ModuleNotFoundError:  # pragma: no cover
-    from mcp.server.mcpserver import MCPServer as FastMCP  # type: ignore
+    from mcp.server.mcpserver import MCPServer as FastMCP  # type: ignore[attr-defined]  # 三方 SDK 泛型/导出缺陷
 
 from .tools import all_tools, call_tool
 
@@ -116,7 +118,8 @@ def build_server(name: str = "pocket-agent"):
             return await call_tool(_tool.name, args)
 
         # 动态签名 + 注解：FastMCP 读 __signature__ 生成 inputSchema
-        _handler.__signature__ = _build_signature(tool.parameters)
+        # 给函数对象动态挂 __signature__ 是 FastMCP 官方用法，mypy 不认函数属性赋值
+        _handler.__signature__ = _build_signature(tool.parameters)  # type: ignore[attr-defined]  # 动态函数属性，运行时合法
         _handler.__annotations__ = {"return": dict}
         mcp.add_tool(_handler, name=tool.name, description=desc)
 

@@ -61,7 +61,9 @@ export interface MessageHit {
   id: number;
   session_id: string;
   title: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "tool";
+  /** 命中来源：正文 / 工具输出 / 工具调用参数（1.3 起搜索覆盖工具产物） */
+  matched?: "message" | "tool_output" | "tool_call";
   snippet: string;
   created_at?: number;
 }

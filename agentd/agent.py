@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable
 
 from . import metrics as _m
 from . import permissions
+from .config import Settings
 from .mem0_memory import Mem0Memory
 from .memory import Store
 from .mock_llm import MockLLM
@@ -172,7 +173,9 @@ class Agent:
     def __init__(
         self,
         store: Store,
-        settings: dict,
+        # 所有调用点都传 Settings 对象（main/telegram/smoke）；裸 dict 是历史遗留
+        # 的兜底路径（见 _cfg 的 isinstance 分支），运行时不再有构造方传入
+        settings: Settings,
         mock: bool = False,
         mem0: Mem0Memory | None = None,
         profile=None,      # profile_memory.ProfileMemory：USER/FACT 文件记忆（可选）
@@ -654,7 +657,9 @@ class Agent:
                 return
 
             # 模型要求调用工具：先落一条带 tool_calls 的 assistant 消息
-            calls_list = [
+            # 显式 list[dict]：内层 function 值含嵌套 dict，不标注会被 mypy
+            # 收窄成 dict[str, str]，导致 c["function"]["name"] 报「对 str 做下标」
+            calls_list: list[dict] = [
                 {
                     "id": tc["id"] or f"call_{i}",
                     "type": "function",
@@ -892,7 +897,9 @@ class Agent:
 
         if decision != "allow":
             if decision == "timeout":
-                result = {"denied": "审批超时，已自动拒绝"}
+                # 显式 dict 标注：与 else 分支 call_tool 的返回值统一为 dict[Any, Any]，
+                # 避免 mypy 把 result 推断成 dict[str, str] 导致 pop 默认值/联合类型误报
+                result: dict = {"denied": "审批超时，已自动拒绝"}
             else:
                 result = {"denied": "用户拒绝了该操作"}
             status = "denied"

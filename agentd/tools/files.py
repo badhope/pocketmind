@@ -74,27 +74,29 @@ def _resolve(raw: str) -> Path:
 def _list_dir_sync(path: str) -> dict:
     try:
         p = _resolve(path)
-    except ValueError as e:
-        return {"error": str(e)}
+    except ValueError as ve:
+        return {"error": str(ve)}
     if not p.is_dir():
         return {"error": f"不是目录：{p}"}
     try:
         entries = []
-        for e in sorted(p.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
+        # 循环变量改名 entry：原与外层 except 变量 e 同名，mypy 会把
+        # except 块结束后变量的「删除」语义套到循环变量上，产生 6 条误报
+        for entry in sorted(p.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
             try:
-                st = e.stat()
+                st = entry.stat()
                 entries.append(
                     {
-                        "name": e.name,
-                        "type": "dir" if e.is_dir() else "file",
-                        "size": st.st_size if e.is_file() else None,
+                        "name": entry.name,
+                        "type": "dir" if entry.is_dir() else "file",
+                        "size": st.st_size if entry.is_file() else None,
                     }
                 )
             except OSError:
-                entries.append({"name": e.name, "type": "unknown", "size": None})
+                entries.append({"name": entry.name, "type": "unknown", "size": None})
         return {"path": str(p), "entries": entries[:500]}
-    except OSError as e:
-        return {"error": f"读取目录失败：{e}"}
+    except OSError as oe:
+        return {"error": f"读取目录失败：{oe}"}
 
 
 async def list_dir(path: str = ".") -> dict:

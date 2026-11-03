@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import warnings
+from typing import Any
 
 from .mcp import tool_schema
 
@@ -48,7 +49,9 @@ class MCPClientWrapper:
         self.args = args
         self.env = env or {}
         self.timeout = timeout
-        self._session = None
+        # 已弃用的旧封装：session 类型由 connect() 运行期回填；
+        # mcp SDK 存根缺陷（__aenter__ 返回值声明错误），用 Any 规避联合/None 误报
+        self._session: Any = None
         self._tools_cache: list[dict] = []
 
     async def connect(self) -> bool:

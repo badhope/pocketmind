@@ -2812,3 +2812,236 @@ body {
   font-size: 13px;
   letter-spacing: 0.02em;
 }
+
+/* ===== 结构化工具结果（1.3）=====
+ * kb_search / kb_list / 任务列表这类 `{ ok, count, results: [...] }` 结果
+ * 不再甩 raw JSON：紧凑表格或标题卡片。配色沿用工具卡内现有变量，
+ * 不引入新色值，明暗主题自动跟随。 */
+.structured {
+  margin-top: 8px;
+  color: var(--text-2);
+  background: var(--inset);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  max-height: 260px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+.structured-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.structured-table th,
+.structured-table td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.structured-table th {
+  color: var(--text-3);
+  font-weight: 500;
+  font-size: 11px;
+}
+.structured-table tr:last-child td {
+  border-bottom: 0;
+}
+.structured-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.structured-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+}
+.structured-item-title {
+  font-weight: 600;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.structured-kv {
+  margin: 4px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.structured-kv-row {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.structured-kv dt {
+  color: var(--text-3);
+  flex: 0 0 auto;
+}
+.structured-kv dd {
+  margin: 0;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.structured-note {
+  margin: 6px 0 0;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+/* ===== 首次运行引导向导（1.3）=====
+ * 模型未配置时出现的一次性浮层：选提供商 → 填 Key 并测连 → 选权限模式。
+ * 「跳过」永远可用 —— 引导只能被关掉，不能变成强制注册流程。 */
+.onboard {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.onboard-card {
+  width: min(560px, 100%);
+  max-height: min(86vh, 720px);
+  overflow-y: auto;
+  background: var(--bg-2, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 14px);
+  padding: 20px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.onboard-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.onboard-head p {
+  margin: 6px 0 0;
+  color: var(--text-3);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.onboard-steps {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.onboard-steps i {
+  height: 3px;
+  flex: 1;
+  border-radius: 2px;
+  background: var(--border);
+}
+.onboard-steps i.on {
+  background: var(--brand, var(--text-1));
+}
+.onboard-providers {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.onboard-provider {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.onboard-provider.on {
+  border-color: var(--brand, var(--text-1));
+  background: color-mix(in srgb, var(--brand, #10b981) 8%, transparent);
+}
+.onboard-provider b {
+  display: block;
+  font-size: 13px;
+}
+.onboard-provider span {
+  display: block;
+  color: var(--text-3);
+  font-size: 11px;
+  margin-top: 2px;
+}
+.onboard-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.onboard-mode {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.onboard-mode.on {
+  border-color: var(--brand, var(--text-1));
+  background: color-mix(in srgb, var(--brand, #10b981) 8%, transparent);
+}
+.onboard-mode b {
+  font-size: 13px;
+}
+.onboard-mode span {
+  display: block;
+  color: var(--text-3);
+  font-size: 12px;
+  margin-top: 2px;
+}
+.onboard-foot {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+}
+.onboard-foot .spacer {
+  flex: 1;
+}
+.onboard-skip {
+  color: var(--text-3);
+  background: transparent;
+  border: 0;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 6px;
+}
+.onboard-ok {
+  color: var(--ok, #22c55e);
+  font-size: 12px;
+}
+.onboard-err {
+  color: var(--err, #ef4444);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+/* ===== 搜索命中来源标签（1.3）=====
+ * 工具输出 / 工具调用参数命中打上小标签，与普通正文命中区分。 */
+.hit-kind {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: 10px;
+  vertical-align: 1px;
+}

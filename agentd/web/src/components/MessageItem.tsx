@@ -5,6 +5,8 @@ import type { Msg, Part, ToolPart } from "../types";
 import type { ApprovalDecision } from "../api";
 import { IconChevron } from "./icons";
 import { formatToolResult } from "../lib/format";
+import { structuredResult } from "../lib/structuredResult";
+import { StructuredResult } from "./StructuredResult";
 import { copyText } from "../native";
 import { PlanCard } from "./PlanCard";
 import { PocketLogo } from "./PocketLogo";
@@ -163,6 +165,9 @@ function ToolCard({
       : JSON.stringify(tool.input ?? {}, null, 2);
   // 结果优先按「键：值」逐行展示（手机窄屏比 raw JSON 好读得多），无法结构化时退回 JSON
   const resultText = tool.result ? formatToolResult(tool.result) : "";
+  // 列表型结果（kb_search / kb_list / 任务列表…）映射成表格/卡片视图；
+  // 映射不了（扁平 kv / 错误）保持原有文本渲染，行为不变。
+  const structured = tool.result ? structuredResult(tool.name, tool.result) : null;
   const waiting = tool.status === "waiting";
   const [countdown, setCountdown] = useState(approvalTimeout);
 
@@ -256,7 +261,11 @@ function ToolCard({
           )}
           {!waiting && tool.result && (
             <div className="tool-result-wrap">
-              <pre className="tool-result">{resultText}</pre>
+              {structured ? (
+                <StructuredResult view={structured} />
+              ) : (
+                <pre className="tool-result">{resultText}</pre>
+              )}
               <button className="tool-copy" onClick={() => void copyResult()} title="复制结果">
                 {copied ? "已复制" : "复制"}
               </button>

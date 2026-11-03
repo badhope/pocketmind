@@ -16,7 +16,7 @@ callback_data 编码（Telegram 限制单条 64 字节）：
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # 仅供类型提示，运行期不真正导入（可选依赖）
     from .config import Settings
@@ -72,7 +72,10 @@ class TelegramGateway:
         # 注入 main.py 的 ApprovalCenter（鸭子类型：需要 ask / decide 两个方法）
         self.approval = approval
         self.mock = mock
-        self.app = None  # ptb Application，start() 后才有
+        # ptb 的 Application 在 start() 里构建；初始为 None。
+        # 标 Any 而非 None：mypy 会把 __init__ 的 None 赋值推断为 None 类型，
+        # 导致 start() 里 add_handler/initialize 等全部报「None 无此属性」
+        self.app: Any = None  # ptb Application，start() 后才有
         # 每个 telegram chat 对应一个 agent 会话 id（重启后重建，不持久化）
         self._chat_sessions: dict[int, str] = {}
 

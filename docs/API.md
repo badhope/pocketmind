@@ -65,7 +65,7 @@
 | DELETE | `/api/sessions/{sid}` | 删除会话（消息/记忆/清单/归档/定时任务级联） |
 | GET | `/api/sessions/{sid}/messages` | 该会话最近 200 条消息 |
 | DELETE | `/api/sessions/{sid}/messages/{mid}` | 从该消息起截断（编辑重发 / 重新生成） |
-| GET | `/api/sessions/search?q=&limit=` | 跨会话搜消息正文 |
+| GET | `/api/sessions/search?q=&limit=` | 跨会话搜索：消息正文 + 工具输出 + 工具调用参数 |
 | POST | `/api/sessions/{sid}/compact` | 手动压缩历史，body `{keep?: int}` |
 | GET/DELETE | `/api/sessions/{sid}/todos` | 会话任务清单 |
 | POST | `/api/undo` | `{session_id, tool_call_id}` 撤销文件写/删 |
@@ -115,3 +115,11 @@
 
 `POST /api/import` 返回 `{"ok": true, "imported": {sessions, sessions_skipped, messages, knowledge, todos, jobs}}`；
 单次最多 500 个会话，超过请拆分。
+
+**备份格式版本（1.3 起）**：`GET /api/export` 响应带 `format_version`（当前 `1`）。
+导入规则：缺失视为 `1`（历史备份照常导入）；大于当前支持的版本 → `400`，
+提示先把本机升级到与备份同版本；非正整数（含布尔值）→ `400`。
+
+**搜索命中来源**：`/api/sessions/search` 的每条命中带 `matched` 字段——
+`message`（消息正文）、`tool_output`（工具输出，`role='tool'` 的 content）、
+`tool_call`（工具调用参数，assistant 消息 `meta.tool_calls` 的 arguments JSON）。

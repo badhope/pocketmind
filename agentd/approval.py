@@ -21,6 +21,7 @@ import json
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 
 # PersistentStore：简单的 JSON 原子写 + 崩溃安全。
@@ -155,8 +156,11 @@ class ApprovalCenter:
             "timeout": timeout,
         }
         self._gates[(session_id, tool_call_id)] = gate
+        # gate 是异构 dict（值含 Event/str/float/None），mypy 无法从下标访问推断
+        # event 类型；cast 仅做类型收窄，运行时恒等调用
+        event = cast(asyncio.Event, gate["event"])
         try:
-            await asyncio.wait_for(gate["event"].wait(), timeout=timeout)
+            await asyncio.wait_for(event.wait(), timeout=timeout)
         except TimeoutError:
             return "timeout"  # 超时默认拒绝（安全优先）
         finally:

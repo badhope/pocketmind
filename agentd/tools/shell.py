@@ -53,7 +53,9 @@ def _kill_group(proc: asyncio.subprocess.Process) -> None:
         return
     try:
         pgid = os.getpgid(proc.pid)
-        os.killpg(pgid, signal.SIGKILL)
+        # os.killpg 是 POSIX 专有 API，Windows 类型存根上不存在；
+        # 运行时已被上方 hasattr(os, "killpg") 能力判断保护，不会在 Windows 走到这里。
+        os.killpg(pgid, signal.SIGKILL)  # type: ignore[attr-defined]  # Unix-only 平台属性
     except (ProcessLookupError, OSError):
         try:
             proc.kill()
@@ -69,16 +71,18 @@ def _rlimit_preexec(max_as_mb: int = 512, max_cpu_s: int = 60, max_nproc: int = 
     - RLIMIT_NPROC：子进程数上限，防 fork bomb
     """
     try:
+        # resource 模块的 getrlimit/setrlimit/RLIMIT_* 均为 Unix-only API，
+        # Windows 类型存根上不存在；运行时已在 try 内，ImportError/OSError 时静默跳过。
         import resource
-        soft_as, hard_as = resource.getrlimit(resource.RLIMIT_AS)
-        target_as = min(hard_as, max_as_mb * 1024 * 1024) if hard_as != resource.RLIM_INFINITY else max_as_mb * 1024 * 1024
-        resource.setrlimit(resource.RLIMIT_AS, (target_as, hard_as))
-        soft_cpu, hard_cpu = resource.getrlimit(resource.RLIMIT_CPU)
-        target_cpu = min(hard_cpu, max_cpu_s) if hard_cpu != resource.RLIM_INFINITY else max_cpu_s
-        resource.setrlimit(resource.RLIMIT_CPU, (target_cpu, hard_cpu))
-        soft_nproc, hard_nproc = resource.getrlimit(resource.RLIMIT_NPROC)
-        target_nproc = min(hard_nproc, max_nproc) if hard_nproc != resource.RLIM_INFINITY else max_nproc
-        resource.setrlimit(resource.RLIMIT_NPROC, (target_nproc, hard_nproc))
+        soft_as, hard_as = resource.getrlimit(resource.RLIMIT_AS)  # type: ignore[attr-defined]  # Unix-only 平台属性
+        target_as = min(hard_as, max_as_mb * 1024 * 1024) if hard_as != resource.RLIM_INFINITY else max_as_mb * 1024 * 1024  # type: ignore[attr-defined]  # Unix-only 平台属性
+        resource.setrlimit(resource.RLIMIT_AS, (target_as, hard_as))  # type: ignore[attr-defined]  # Unix-only 平台属性
+        soft_cpu, hard_cpu = resource.getrlimit(resource.RLIMIT_CPU)  # type: ignore[attr-defined]  # Unix-only 平台属性
+        target_cpu = min(hard_cpu, max_cpu_s) if hard_cpu != resource.RLIM_INFINITY else max_cpu_s  # type: ignore[attr-defined]  # Unix-only 平台属性
+        resource.setrlimit(resource.RLIMIT_CPU, (target_cpu, hard_cpu))  # type: ignore[attr-defined]  # Unix-only 平台属性
+        soft_nproc, hard_nproc = resource.getrlimit(resource.RLIMIT_NPROC)  # type: ignore[attr-defined]  # Unix-only 平台属性
+        target_nproc = min(hard_nproc, max_nproc) if hard_nproc != resource.RLIM_INFINITY else max_nproc  # type: ignore[attr-defined]  # Unix-only 平台属性
+        resource.setrlimit(resource.RLIMIT_NPROC, (target_nproc, hard_nproc))  # type: ignore[attr-defined]  # Unix-only 平台属性
     except (ImportError, ValueError, OSError):
         pass  # Windows / 权限不足时静默跳过
 

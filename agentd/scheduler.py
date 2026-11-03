@@ -260,7 +260,10 @@ class SchedulerService:
         # 默认停用：立即 pause（next_run_time=None，持久化后重启仍停用）
         if not job.get("enabled", True):
             self._sched.pause_job(jid)
-        return self.get(jid)
+        # 刚 add_job 成功，get 必然命中；assert 仅做 None 收窄，运行时行为不变
+        created = self.get(jid)
+        assert created is not None
+        return created
 
     def update(self, jid: str, patch: dict) -> dict | None:
         """更新 job。
@@ -273,6 +276,8 @@ class SchedulerService:
             return None
 
         existing = self.get(jid)
+        # 上一步已确认 job 存在于调度器，get 必然命中；assert 仅做 None 收窄
+        assert existing is not None
 
         # ── 调度参数变更（需重建 trigger + 更新 kwargs 缓存） ──
         if "expr" in patch or "trigger_type" in patch:
