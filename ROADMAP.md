@@ -5,32 +5,33 @@ Status legend: **shipped** · **in progress** · **planned** · **exploring**
 This roadmap states what is real today and what is deliberately not built yet.
 Items move into [CHANGELOG.md](CHANGELOG.md) when they ship.
 
-## Now — 1.3.x (current)
+## Now — 1.4.x (current)
 
 | Item | Status | Notes |
 |---|---|---|
-| Server-enforced approval for Web and Telegram agent paths | shipped | Three-level grants, global deny list, 120 s auto-deny. |
-| 41 tools (39 built-in + 2 runtime) | shipped | `safe` / `write` / `danger` risk tiers. |
-| Local-first SQLite storage with 0600/0700 permissions | shipped | Sessions, messages, memory, jobs, checkpoints. |
-| SSE streaming chat with per-message token usage | shipped | Falls back gracefully when the endpoint omits `usage`. |
-| Plan / Act agent modes | shipped | Plan emits a `plan` event, execution requires explicit approval. |
-| Scheduled jobs + recipes | shipped | Interval, cron, and battery-condition triggers. |
-| Backup export / import with pagination and de-duplication | shipped | Export is never silently truncated; `format_version` since 1.3.0. |
-| MCP stdio server exposing all tools | shipped | Desktop hosts must supply their own confirmation. |
-| Optional Telegram gateway | shipped | Whitelisted `chat_id` only. |
-| APK WebView shell with Termux deployment | shipped | Installable artifact produced by CI. |
+| **Kotlin native engine (single-APK core)** | shipped | In-process HTTP/SSE + SQLite + agent loop + approvals + 26 native tools; Termux no longer required. |
+| Server-enforced approval for Web and Telegram agent paths | shipped | Three-level grants, global deny list, 120 s auto-deny (native + Python). |
+| 41 tools in the Python runtime / 26 tools in the native runtime | shipped | `safe` / `write` / `danger` risk tiers preserved; native `run_shell` degrades honestly. |
+| Local-first storage | shipped | Python: SQLite at 0600/0700. Native: app-private SQLite. |
+| SSE streaming chat with per-message token usage | shipped | Both runtimes. |
+| Plan / Act agent modes | shipped | Both runtimes (native plan-approve via resend). |
+| Scheduled jobs + recipes | shipped (Python) / **not native** | Native engine returns empty sets; Android scheduler is a 1.5 slice. |
+| Backup export / import | shipped | `format_version` stamped on both runtimes; bundles are cross-compatible. |
+| MCP stdio server / Telegram gateway | Python only | Native engine degrades explicitly. |
 | First-run onboarding wizard | shipped | Provider preset → connectivity-tested API key → permission walkthrough. |
-| Session search across tool output | shipped | Tool results and tool-call arguments are indexed; hits carry a `matched` kind. |
-| Structured tool result viewer | shipped | List-shaped results render as tables/cards instead of raw JSON. |
-| Export format versioning | shipped | `format_version` stamped on export; importers reject future versions. |
+| Session search across tool output | shipped | `matched` kinds on both runtimes (native: LIKE over tool rows). |
+| Structured tool result viewer | shipped | List-shaped results render as tables/cards. |
 | `mypy` gate | shipped | Zero errors, enforced by `tests/run_all.sh`. |
-| Full local gate in one command | shipped | `bash tests/run_all.sh`. |
+| Full local gate in one command | shipped | `bash tests/run_all.sh` + `gradle testDebugUnitTest` (34 Robolectric tests). |
 
-## Next — 1.4.x
+## Next — 1.5.x
 
 | Item | Status | Notes |
 |---|---|---|
-| Kotlin native runtime (in-process HTTP service) | exploring | Slice 1–2 archived under `docs/history/kotlin-migration-slice2/`. The spike proves a trusted bootstrap path and a fail-closed API surface, but it does **not** implement any business endpoint. It is not wired into the shipped APK. |
+| Android job scheduler (WorkManager/AlarmManager) in the native engine | planned | Restore jobs/recipes parity; battery-condition triggers map to WorkManager constraints. |
+| Runtime permission flow for SMS/call/location/camera tools | planned | Tools currently return `permission_required` with a hint; wire guided grant requests. |
+| Checkpoint/undo for native file tools | planned | Mirror the Python checkpoint store. |
+| MCP client/server over the native engine | exploring | stdio is Termux-bound; evaluate in-app socket transport. |
 
 ## Later — beyond 1.3
 
@@ -49,7 +50,7 @@ mistakes a green local gate for full coverage.
 | Gap | Why it exists | What would close it |
 |---|---|---|
 | **CI has never actually run on Linux for this revision.** The gate is green on Windows; two suites (`m5` permission bits, `p3` subprocess reaping) skip themselves on non-POSIX and are asserted only on Linux. | The development host is Windows; no Linux runner or working Docker daemon was available. | One green CI run on `ubuntu-latest`, or `bash tests/run_all.sh` inside a Linux container. |
-| **No real-device APK test.** The APK builds, passes lint, and its manifest/version are verified statically; Robolectric covers the Activity/Service logic. | The host is a KVM guest without nested virtualisation, so AVDs never come up. | Install on a physical Android device and exercise the WebView bootstrap, foreground service and clipboard bridge. |
+| **No real-device APK test — now the top gap.** The native engine passes 34 Robolectric tests (engine auth, routing, storage, agent loop, approvals) and the APK builds with lint clean, but no physical device has run the full bootstrap → LLM → tool → approval flow. | The host is a KVM guest without nested virtualisation, so AVDs never come up. | Install v1.4.0 on a physical Android device; exercise onboarding, chat with tool calls, and approval cards. |
 | **Playwright E2E is opt-in.** | Browsers are a large download; the gate must stay runnable on a phone. | Run `--with-e2e` on CI as a separate job. |
 
 ## Explicitly not planned

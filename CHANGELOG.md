@@ -11,6 +11,50 @@ Release mechanics are documented in [docs/VERSIONING.md](docs/VERSIONING.md).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-03
+
+### Added
+
+- **Kotlin native engine — the APK now works standalone.** The shipped APK no
+  longer requires Termux, Termux:API or the in-Termux Python deployment. A
+  foreground service (`NativeEngineService`) runs the whole agent in-process:
+  loopback HTTP/SSE with one-time navigation grants and HttpOnly cookie
+  sessions (Slice 2 contract preserved), SQLite storage for sessions/messages/
+  knowledge/todos/facts, settings with the same masking/merge semantics, and
+  the agent loop (streaming OpenAI-compatible client, tool-call loop, Plan/Act,
+  server-enforced approvals with the five decisions and global allow/deny
+  rules, per-session queueing and stop).
+- **26 native tools** replacing their termux-api counterparts via Android APIs:
+  battery, clipboard, notifications, toast, vibrate, torch, volume/brightness,
+  sensors, WiFi info/scan, location, SMS send/read, dial (via ACTION_DIAL —
+  the user keeps the final confirm), TTS, app-private file ops, download,
+  knowledge base, facts, todos, web search/read with the same SSRF guard.
+  `run_shell` is registered but returns a structured
+  `capability_unavailable` — never a silent fake success.
+- **Honest degradation surface**: `/api/diagnostics` and `/api/tools` report
+  real availability; jobs/recipes/undo/skills return empty sets or explicit
+  `capability_unavailable` until their slices land.
+- The web UI ships inside the APK as build assets (`syncWebDist` gradle task),
+  so the same React front end runs against the native engine unchanged.
+- **Robolectric engine contract tests** (12 cases) lock the whole loop:
+  navigation-grant single use, cookie auth, settings masking round-trip, chat
+  SSE event sequence, tool auto-execution, approval flow end-to-end, chat-mode
+  denial, export `format_version`, and fail-closed 503 on unimplemented paths.
+
+### Changed
+
+- MainActivity is native-first: it binds the engine service and loads the
+  granted document; the Termux self-check flow remains as a fallback path and
+  the legacy bridge stays untouched for Termux users.
+- The docs-based Kotlin spike (Slice 2) is now the shipped runtime; the
+  `RUN_COMMAND` deployment path is no longer the primary onboarding.
+
+### Notes
+
+- scheduler (jobs/recipes), MCP stdio, Telegram gateway and checkpoints/undo
+  remain Python-side features; the native engine degrades them explicitly.
+  See ROADMAP for the 1.5 slices.
+
 ## [1.3.0] - 2026-11-03
 
 ### Added

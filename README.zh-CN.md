@@ -142,12 +142,27 @@
 - **设备能力有差异。** 短信、电话、定位、传感器、电量、相机需要真机 + `termux-api`。
   聊天、文件、记忆、清单与调度在任何环境都能用。查
   [docs/capability-matrix.md](docs/capability-matrix.md) 或在设备上跑 `GET /api/diagnostics`。
-- **APK 是 WebView 壳。** 它承载 UI、前台服务与原生剪贴板桥，Agent 本体跑在 Termux 里。
-  全原生 Kotlin 后端是一个开放探索，不是已交付功能——见 [ROADMAP.md](ROADMAP.md)。
+- **APK 自带原生 Kotlin 引擎（1.4.0 起）。** 核心功能不装 Termux 即可用；
+  原生调度器、MCP 与 Termux 可选桥是 1.5 的切片——见 [ROADMAP.md](ROADMAP.md)。
 
 ## 安装
 
-### 方案 A —— 装在手机上（推荐）
+### 方案 A —— 只装 APK，不需要 Termux（推荐，1.4.0 起）
+
+APK 原生运行整个 Agent：安装 → 打开 → 选提供商 → 填 API Key → 开聊。
+手机上不需要 Termux、Python 或任何工具链。
+
+```bash
+bash scripts/build-apk.sh            # debug APK，已校验、可直接安装
+bash scripts/build-apk.sh --release  # 没有 keystore.properties 时是未签名件
+```
+
+原生引擎当前覆盖：对话（SSE）、三种权限模式、服务端强制审批、26 个
+手机/文件/知识库工具（Android API 直调）、会话、导出导入、搜索。
+暂未覆盖且会**明确告知**（不伪成功）：shell 命令、定时任务、MCP、Telegram。
+需要这些请用方案 B。
+
+### 方案 B —— Termux 完整 41 工具运行时
 
 ```bash
 # 在 Termux（F-Droid 版，另装 Termux:API）里一次性准备
@@ -164,7 +179,7 @@ bash termux/start.sh        # http://127.0.0.1:8787
 > 想从同一 Wi-Fi 的其他设备访问：`bash termux/start.sh --lan`。
 > 首次运行会生成令牌，页面会向你要。
 
-### 方案 B —— 本机试跑，不需要手机
+### 方案 C —— 本机试跑，不需要手机
 
 ```bash
 cd pocketmind
@@ -174,15 +189,6 @@ AGENT_HOME=/tmp/pa python3 -m agentd.main --mock --port 8787
 
 `--mock` 不需要 API Key，会走完流式输出、工具调用、审批与结果回填。
 上面的演示 GIF 就是用它录的。
-
-### 方案 C —— APK
-
-```bash
-bash scripts/build-apk.sh            # debug APK，已校验、可直接安装
-bash scripts/build-apk.sh --release  # 没有 keystore.properties 时是未签名件
-```
-
-CI 每次推送都会构建并校验 APK，也可以直接从工作流运行里取制品，不必本地构建。
 
 ## 配置
 

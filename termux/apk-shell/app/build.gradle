@@ -1,6 +1,7 @@
 // app 模块
 plugins {
     id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
 }
 
 // 版本号从 gradle.properties 读取（单源，见 tests/check_version.py）。
@@ -10,6 +11,15 @@ def versionCodeValue = project.findProperty("POCKET_VERSION_CODE")
 if (!versionNameValue || !versionCodeValue) {
     throw new GradleException("缺少 POCKET_VERSION_NAME / POCKET_VERSION_CODE（应在 gradle.properties 中定义）")
 }
+
+// 前端构建产物 → APK assets：原生引擎直接服务 React dist（手机端零 Node）。
+// 每次构建前同步，保证 APK 里的页面与仓库提交的 dist 一致。
+def webDistDir = file("$rootDir/../../agentd/web/dist")
+tasks.register('syncWebDist', Copy) {
+    from webDistDir
+    into file('src/main/assets/web')
+}
+preBuild.dependsOn syncWebDist
 
 // 发布签名：可选的 keystore.properties（不入库）。
 // 没有它时 release 构建产出 unsigned APK —— 显式命名，避免把未签名包当成品分发。
@@ -80,6 +90,11 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    // Kotlin 与 Java 必须同 JVM target（否则 compileDebugKotlin 直接失败）
+    kotlinOptions {
+        jvmTarget = '1.8'
     }
 
     testOptions {

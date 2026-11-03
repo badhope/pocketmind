@@ -4,6 +4,15 @@
 
     <!-- 访问本机 agentd 服务 -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- 原生工具所需权限（运行时按工具逐项检查，未授予时返回结构化错误而非崩溃） -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.CALL_PHONE" />
 
     <!-- Android 13+ 通知权限：审批提醒、定时任务到达 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"
@@ -81,6 +90,20 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="@string/monitor_fgs_subtype" />
+        </service>
+
+        <!--
+          原生引擎服务（单 APK 可用的核心）：进程内 HTTP/SSE + 工具 + SQLite。
+          Termux 未安装时它是唯一后端；Termux 存在时二者并存、原生优先。
+        -->
+        <service
+            android:name=".runtime.NativeEngineService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse|dataSync"
+            tools:targetApi="34">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="local_agent_engine" />
         </service>
 
     </application>

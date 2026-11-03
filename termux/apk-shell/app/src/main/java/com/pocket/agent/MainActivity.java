@@ -69,6 +69,13 @@ public class MainActivity extends Activity {
     private boolean agentdUnreachable = false;
     private String pageTitle;
 
+    // ── 原生引擎（单 APK 可用）：Termux 存在与否，原生都是首选后端 ──
+    private com.pocket.agent.runtime.NativeEngineService.LocalBinder nativeBinder;
+    private boolean nativeBound = false;
+    private boolean usedNative = false;
+    private int nativeUrlRetries = 0;
+    private android.content.ServiceConnection nativeConnection;
+
     // ── 监控器广播接收：实时驱动错误页切换 ──
     private BroadcastReceiver monitorReceiver;
     private boolean monitorReceiverRegistered = false;
@@ -126,11 +133,79 @@ public class MainActivity extends Activity {
         registerMonitorReceiver();
         registerTokenReceiver();
         startMonitorService();
+        // 原生引擎优先：绑定成功即加载，失败再退回 Termux 自检
+        connectNativeEngine();
         // Android 13+ 预测性返回：必须显式注册回调，否则返回手势直接退出应用，
         // WebView 的历史回退（在设置面板里返回上一层）失效。
         registerBackHandler();
         // 尽力从 Termux 读取访问令牌（后台，不阻塞首屏）
         new Thread(this::requestTokenFromTermux).start();
+    }
+
+    // ════════════════════════════════════════════════
+    //  原生引擎接线（1.4：单 APK 可用）
+    // ════════════════════════════════════════════════
+
+    /**
+     * 启动并绑定 NativeEngineService；就绪后加载带一次性导航许可的文档 URL。
+     * 原生引擎起不来时走原 Termux 自检路径（agentd 在 Termux 里运行的老部署）。
+     */
+    private void connectNativeEngine() {
+        if (nativeBound) return;
+        Intent i = new Intent(this, com.pocket.agent.runtime.NativeEngineService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(i);
+        } else {
+            startService(i);
+        }
+        nativeConnection = new android.content.ServiceConnection() {
+            @Override
+            public void onServiceConnected(android.content.ComponentName name, android.os.IBinder service) {
+                nativeBinder = (com.pocket.agent.runtime.NativeEngineService.LocalBinder) service;
+                if (nativeBinder != null && nativeBinder.isRunning()) {
+                    loadNativeUrl();
+                } else if (nativeUrlRetries++ < 10) {
+                    mainHandler().postDelayed(() -> {
+                        if (nativeBinder != null && nativeBinder.isRunning()) loadNativeUrl();
+                    }, 300);
+                } else {
+                    Log.w(TAG, "native engine not running; falling back to Termux flow");
+                    performStartupSelfCheck();
+                }
+            }
+
+            @Override
+            public void onServiceDisconnected(android.content.ComponentName name) {
+                nativeBinder = null;
+                if (usedNative && !agentdUnreachable) {
+                    agentdUnreachable = true;
+                    showErrorPage();
+                }
+            }
+        };
+        bindService(new Intent(this, com.pocket.agent.runtime.NativeEngineService.class),
+                nativeConnection, Context.BIND_AUTO_CREATE);
+        nativeBound = true;
+    }
+
+    /** 加载原生引擎主文档（一次性导航许可 → HttpOnly 会话 cookie）。 */
+    private void loadNativeUrl() {
+        if (nativeBinder == null) return;
+        String url = nativeBinder.newDocumentUrl();
+        if (url == null && nativeUrlRetries++ < 10) {
+            mainHandler().postDelayed(this::loadNativeUrl, 200);
+            return;
+        }
+        if (url == null) {
+            Log.w(TAG, "cannot issue navigation grant; falling back");
+            performStartupSelfCheck();
+            return;
+        }
+        usedNative = true;
+        agentdUnreachable = false;
+        nativeUrlRetries = 0;
+        Log.i(TAG, "loading native engine document");
+        web.loadUrl(url);
     }
 
     // ════════════════════════════════════════════════
@@ -159,6 +234,8 @@ public class MainActivity extends Activity {
             @Override
             public void onReceive(Context ctx, Intent intent) {
                 if (intent == null) return;
+                // 原生引擎模式下监控器探的是 Termux 的 8787，不能误切错误页
+                if (usedNative) return;
                 boolean alive = intent.getBooleanExtra(MonitorService.EXTRA_IS_ALIVE, true);
                 Log.d(TAG, "Monitor broadcast: alive=" + alive);
                 if (!alive && !agentdUnreachable) {
@@ -221,6 +298,14 @@ public class MainActivity extends Activity {
     }
 
     private void pingOnResume() {
+        // 原生引擎模式：服务进程存续即恢复（引擎是进程内的，无网络面可探）
+        if (usedNative) {
+            if (nativeBinder != null && nativeBinder.isRunning() && agentdUnreachable) {
+                agentdUnreachable = false;
+                loadNativeUrl();
+            }
+            return;
+        }
         if (!healthInProgress.compareAndSet(false, true)) return;
         new Thread(() -> {
             final boolean alive = doHealthCheck();
@@ -541,6 +626,13 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (nativeBound && nativeConnection != null) {
+            try {
+                unbindService(nativeConnection);
+            } catch (IllegalArgumentException ignored) {
+            }
+            nativeBound = false;
+        }
         if (monitorReceiverRegistered) {
             unregisterReceiver(monitorReceiver);
             monitorReceiverRegistered = false;

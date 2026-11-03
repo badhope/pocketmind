@@ -161,13 +161,29 @@ limits:
   real Android phone with `termux-api`. Chat, files, memory, todos and the scheduler
   work anywhere. Check [docs/capability-matrix.md](docs/capability-matrix.md) or
   `GET /api/diagnostics` on your device.
-- **The APK is a WebView shell.** It hosts the UI, a foreground service and a native
-  clipboard bridge; the agent itself runs in Termux. A fully native Kotlin backend
-  is an open exploration, not a shipped feature — see [ROADMAP.md](ROADMAP.md).
+- **The APK ships a native Kotlin engine (since 1.4.0).** Core features run
+  without Termux; a fully native Android scheduler, MCP and Termux-provider
+  bridge are the 1.5 slices — see [ROADMAP.md](ROADMAP.md).
 
 ## Install
 
-### Option A — on your phone (recommended)
+### Option A — the APK, no Termux needed (recommended, since 1.4.0)
+
+The APK runs the agent natively: install it, open it, pick a provider, enter
+your API key, chat. No Termux, no Python, no toolchain on the phone.
+
+```bash
+bash scripts/build-apk.sh            # debug APK, verified and installable
+bash scripts/build-apk.sh --release  # unsigned unless keystore.properties is present
+```
+
+What the native engine covers today: chat (SSE), all three permission modes,
+server-enforced approvals, 26 phone/file/knowledge tools via Android APIs,
+sessions, export/import, search. What it deliberately does not do yet (the app
+says so explicitly instead of faking it): shell commands, scheduled jobs, MCP,
+Telegram. For those, use Option B.
+
+### Option B — on your phone with Termux (full 41-tool runtime)
 
 ```bash
 # One-time setup in Termux (F-Droid build, plus Termux:API)
@@ -184,7 +200,7 @@ Open the URL, then **⚙ Settings → pick a provider → enter your API key →
 > Reaching it from another device on the same Wi-Fi: `bash termux/start.sh --lan`.
 > A token is generated on first run and the page asks for it.
 
-### Option B — try it locally, no phone
+### Option C — try it locally, no phone
 
 ```bash
 cd pocketmind
@@ -194,16 +210,6 @@ AGENT_HOME=/tmp/pa python3 -m agentd.main --mock --port 8787
 
 `--mock` needs no API key and exercises streaming, tool calls, approval and result
 folding. It is what the demo GIF above was recorded with.
-
-### Option C — the APK
-
-```bash
-bash scripts/build-apk.sh            # debug APK, verified and installable
-bash scripts/build-apk.sh --release  # unsigned unless keystore.properties is present
-```
-
-CI builds and verifies an APK on every push, so you can also grab the artifact from
-a workflow run instead of building locally.
 
 ## Configuration
 
