@@ -26,7 +26,7 @@ opentelemetry-sdk>=1.24
 # 注意：instrumentation 系列用的是独立的 0.x beta 版本线，发布号形如 0.46b0 / 0.66b1。
 # 按 PEP 440，0.46b0 < 0.46，所以写 ">=0.46" 会匹配不到任何版本——全新安装直接失败。
 # 必须显式带 beta 后缀，且与 opentelemetry-sdk 的 1.x 线配套使用（0.4x b0 ↔ 1.2x）。
-opentelemetry-instrumentation-fastapi>=0.46b0
+opentelemetry-instrumentation-fastapi>=0.66b2
 # OTEL OTLP/gRPC 导出：**可选依赖**，不要放进主清单。
 # 原因（Android 模拟器实测）：它会拖入 grpcio，而 grpcio 在 Termux 上没有预编译
 # wheel，要现场编译 BoringSSL/Abseil/gRPC 全套 C++ —— 单这一步就超过 1 小时，
