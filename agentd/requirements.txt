@@ -14,7 +14,7 @@ sse-starlette>=2.1
 # 锁大版本 = 可预测的升级点；需要 v3 时改这里并跑全量回归。
 pydantic>=2.0,<3
 pydantic-settings>=2.0,<3
-mcp>=1.0
+mcp>=2.3.0
 sqlalchemy[asyncio]>=2.0,<3
 aiosqlite>=0.19
 # fastapi 传递依赖：python-multipart 0.0.20 有多个 CVE（PYSEC-2026-*），这里显式抬地板
