@@ -67,8 +67,20 @@ Windows 上可以跑后端与测试（`web/start.sh`、`tests/*.sh` 需要 Git B
 typecheck + vitest + build + `dist/` 新鲜度校验。GitHub Actions 工作流已于 2026-10-18 移除，
 门禁改为本地/CI 自建流水线都可直接调用这个脚本。
 
-## 仓库与镜像
+## 仓库与镜像（2026-11-03 起共 5 处）
 
-主仓库 `gitcode.com/badhope/pocketmind`，镜像在 Gitee `gitee.com/badhope/pocketmind` 与
-GitHub `github.com/X33834/pocketmind`。三处内容应保持一致（同一 tree），**push 到 gitcode 后同步镜像**：
-`git push gitee main --tags`、`git push github main --tags`。仓库内已无 `.github/workflows`。
+主仓库 `gitcode.com/badhope/pocketmind`（remote `origin`），镜像 4 处：
+Gitee `gitee.com/badhope/pocketmind`（remote `gitee`）、GitHub
+`X33834/pocketmind`（`gh-x33834`）、`Morningstar202604/pocketmind`（`gh-morningstar`）、
+`badhope/pocketmind`（`gh-badhope`）。五处内容应保持一致（同一 tree），
+**push 到 gitcode 后同步其余镜像**：`git push <remote> main --tags`（`latest` 标签需 `--force`）。
+GitHub 各账号的 PAT 由用户在会话中提供，未存入仓库配置——推送用一次性 URL 或凭据管理器；
+本机代理的 schannel TLS 对 github.com 偶发握手失败，遇错可改用 GitHub REST API
+（POST /git/tags + /git/refs）补推附注标签。仓库内已无 `.github/workflows`。
+
+## 版本
+
+- v1.3.0（2026-11-03）：首次运行引导向导、跨工具输出搜索（命中带 matched 类型）、
+  结构化工具结果查看器、导出 format_version、mypy 清零并入门禁。
+- 门禁注意事项：本机代理 Fake-IP DNS 会把 example.com 解析到 198.18.0.32（保留段），
+  p13/p17 的 example.com 用例因此失败——属环境问题，非代码回归；其余套件全绿。
