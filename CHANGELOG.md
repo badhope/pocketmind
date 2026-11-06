@@ -11,6 +11,94 @@ Release mechanics are documented in [docs/VERSIONING.md](docs/VERSIONING.md).
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-06
+
+### Fixed
+
+- **Two endpoints the frontend called but the native engine never implemented.**
+  `GET /api/sessions/search` and `POST /api/sessions/{sid}/compact` returned 404
+  in the standalone APK, so the session drawer's full-text search (including
+  tool output and tool-call arguments) and the "compress history" button were
+  silently dead. Both are now real: LIKE-based search across sessions with the
+  same `matched` labels as Python (`message` / `tool_output` / `tool_call`), and
+  archive-based compaction that keeps the last N messages, emits a summary, and
+  advances the `archived_upto` watermark so a second press does not re-summarise
+  the same range.
+- **Compaction summaries are actually injected.** A new `archives` table stores
+  the rolling summaries and `AgentLoop` prepends them to the system prompt;
+  without this, "compress" would have hidden messages while the model still
+  forgot them.
+- **`ApiContract` described a runtime that no longer existed.** It still listed
+  chat/tools/sessions/jobs as unimplemented. Rewritten to match reality and
+  backed by a new contract self-check test that probes every endpoint in the
+  list and fails if any returns `not_implemented`.
+
+### Changed
+
+- README (both languages): tool counts corrected (37 native / 41 Termux =
+  39 built-in + 2 runtime), the Termux-only list narrowed to MCP / Telegram /
+  skills / subagent, and the scheduler section now states what makes it real
+  (Doze survival, reboot re-arm, next-occurrence scheduling).
+
+## [1.5.0] - 2026-11-06
+
+### Added
+
+- **Native scheduler — the APK no longer needs Termux for timed jobs.** Jobs and
+  recipes are back on the native engine: `GET/POST /api/jobs`,
+  `PUT/DELETE /api/jobs/{id}`, `POST /api/jobs/{id}/run`, `GET /api/recipes`,
+  `POST /api/recipes/{id}/apply`. Triggers are `AlarmManager` alarms
+  (`setExactAndAllowWhileIdle`, degrading to `setAndAllowWhileIdle` when
+  `SCHEDULE_EXACT_ALARM` is not granted on Android 12+), so a job still fires
+  after the screen locks. A 5-field cron parser (ranges, lists, steps),
+  interval and one-shot triggers are supported; conditions stay
+  `battery < N`. Firing re-arms the next occurrence, and `BOOT_COMPLETED`
+  replays all alarms after a reboot — the case that silently killed schedules
+  before.
+- **Camera and speech-tool honesty.** `take_photo` now launches the system
+  camera with a MediaStore output URI (works from a background service without
+  pulling in AndroidX), saving into `Pictures/PocketMind`. `speech_to_text`
+  still cannot run headless — it needs foreground mic focus — but now says so
+  in actionable terms instead of a generic "not implemented".
+- **Native `run_shell`.** `/system/bin/sh -c` with a 300 s cap, 30 KB output
+  truncation, separate stdout/stderr capture and explicit `exit_code`. It runs
+  as the app's own uid: no root, no `pkg`/`apt`, no busybox set. This is a real
+  shell, not the previous `capability_unavailable` stub, and the diagnostics
+  endpoint reports it as `restricted` rather than pretending it is Termux.
+- **Checkpoints and undo.** `write_file` (overwrite) and `delete_file` back up
+  the original into `files/checkpoints` before acting; the tool result carries
+  `_ckpt`, the agent strips it into the `checkpoints` table and emits
+  `undoable: true`, and `POST /api/undo` restores the file. Repeat undos are
+  rejected. This closes the gap where a native file edit was irreversible.
+- Ten new Robolectric contract tests (41 total): jobs CRUD and expression
+  validation, recipe listing/apply, run-now delivery into the target session,
+  undo round-trip, and real `run_shell` execution with exit-code reporting.
+
+### Fixed
+
+- `scan_wifi` would have thrown `SecurityException` on a device: the manifest
+  was missing `ACCESS_WIFI_STATE`. Lint caught it; the permission is now
+  declared.
+- `NativeEngine.urlDecode` called `URLDecoder.decode(String, Charset)`, which
+  requires API 33 while `minSdk` is 26 — `NoSuchMethodError` on older devices.
+  Switched to the `charsetName` overload.
+- Declared `uses-feature required="false"` for camera, telephony and WiFi so
+  Play does not filter out tablets and ChromeOS devices that lack them.
+- `Store` schema moved to v2 with an `onUpgrade` path; v1 databases upgrade in
+  place instead of crashing on the missing `jobs`/`checkpoints` tables.
+
+### Notes
+
+- Still Python-only by design: MCP, Telegram gateway, skills directory, and
+  subagent. The native engine keeps returning explicit
+  `capability_unavailable` for those rather than faking success.
+- `set_wifi` and `tts_offline` are **not** planned for the native engine:
+  Android 10+ forbids apps from toggling WiFi, and offline TTS needs a
+  multi-hundred-MB model that would triple the APK. Both stay Termux features.
+- No physical-device run yet. The gate is 41 Robolectric tests + clean lint +
+  a debug APK build on the Windows host; the AVD cannot start (no nested
+  virtualisation).
+
 ## [1.4.0] - 2026-11-03
 
 ### Added

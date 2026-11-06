@@ -26,6 +26,8 @@ class ApiRouter(
     val approval: ApprovalCenter,
     val agent: AgentLoop,
     private val engine: () -> NativeEngine?,
+    /** 定时任务调度器；单测里可传一个不碰 AlarmManager 的实例。 */
+    private val scheduler: NativeScheduler = NativeScheduler(context, store, agent),
 ) : NativeEngine.Handler {
 
     private val startedAt = System.currentTimeMillis()
@@ -109,6 +111,8 @@ class ApiRouter(
             path == "/api/llm/test" && ex.method == "POST" -> llmTest(ex)
             path == "/api/sessions" && ex.method == "GET" ->
                 ex.respond(200, JSON, store.listSessions().toString())
+            // 必须排在 startsWith("/api/sessions/") 之前，否则会被当成会话 id="search"。
+            path == "/api/sessions/search" && ex.method == "GET" -> searchSessions(ex)
             path == "/api/sessions" && ex.method == "POST" -> {
                 val body = bodyJson(ex)
                 val s = store.createSession(body.optString("title", "新会话").ifEmpty { "新会话" })
@@ -149,18 +153,26 @@ class ApiRouter(
             path == "/api/export" && ex.method == "GET" ->
                 ex.respond(200, JSON, store.exportAll().toString())
             path == "/api/import" && ex.method == "POST" -> import(ex)
-            path == "/api/undo" && ex.method == "POST" ->
-                ex.respond(503, JSON, "{\"error\":\"undo 在原生引擎上不可用\",\"error_code\":\"capability_unavailable\"}")
+            path == "/api/undo" && ex.method == "POST" -> {
+                val body = bodyJson(ex)
+                val sid = body.optString("session_id")
+                val tid = body.optString("tool_call_id")
+                if (sid.isEmpty() || tid.isEmpty()) {
+                    return ex.respond(400, JSON, "{\"error\":\"需要 session_id 与 tool_call_id\"}")
+                }
+                // 语义与 Python 一致：业务失败用 200 + error 字段，前端按 error 展示。
+                ex.respond(200, JSON, agent.undo(sid, tid).toString())
+            }
             path == "/api/jobs" && ex.method == "GET" ->
-                ex.respond(200, JSON, "{\"jobs\":[],\"note\":\"原生引擎 v1 未内置定时调度\"}")
+                ex.respond(200, JSON, JSONObject().put("jobs", scheduler.listJson()).toString())
+            path == "/api/jobs" && ex.method == "POST" -> createJob(ex)
             path == "/api/recipes" && ex.method == "GET" ->
-                ex.respond(200, JSON, "{\"recipes\":[]}")
-            path.startsWith("/api/recipes/") ->
-                ex.respond(503, JSON, "{\"error\":\"配方在原生引擎上暂不可用\",\"error_code\":\"capability_unavailable\"}")
+                ex.respond(200, JSON, JSONObject().put("recipes", Recipes.list(store)).toString())
+            path.startsWith("/api/recipes/") && path.endsWith("/apply") && ex.method == "POST" ->
+                applyRecipe(ex, path.removePrefix("/api/recipes/").removeSuffix("/apply"))
             path == "/api/memory/profile" && ex.method == "GET" -> profileGet(ex)
             path == "/api/memory/profile" && ex.method == "PUT" -> profilePut(ex)
-            path.startsWith("/api/jobs/") ->
-                ex.respond(503, JSON, "{\"error\":\"定时任务在原生引擎 v1 上暂不可用\",\"error_code\":\"capability_unavailable\"}")
+            path.startsWith("/api/jobs/") -> jobDetail(ex, path)
             else -> // fail-closed：契约里登记过但没实现的 /api 路径，绝不 200
                 ex.respond(503, JSON, "{\"error\":\"unavailable\",\"migration\":\"not_implemented\"}")
         }
@@ -202,8 +214,31 @@ class ApiRouter(
                 store.clearTodos(sid)
                 ex.respond(200, JSON, "{\"ok\":true}")
             }
+            parts.getOrNull(1) == "compact" && ex.method == "POST" -> compactSession(ex, sid)
             else -> ex.respond(404, JSON, "{\"error\":\"not_found\"}")
         }
+    }
+
+    private fun searchSessions(ex: Exchange) {
+        val q = (ex.query["q"] ?: "").trim()
+        val limit = (ex.query["limit"]?.toIntOrNull() ?: 20).coerceIn(1, 50)
+        if (q.isEmpty()) return ex.respond(200, JSON, "{\"query\":\"\",\"count\":0,\"items\":[]}")
+        val items = store.searchMessages(q, limit)
+        ex.respond(200, JSON, JSONObject()
+            .put("query", q).put("count", items.length()).put("items", items).toString())
+    }
+
+    /**
+     * 手动压缩会话：把较早的历史归档成摘要，保留最近 keep 条原文。
+     *
+     * 与 Python 一样，LLM 不可用时降级为「最后一条用户消息」占位摘要——
+     * 压缩的价值是别丢上下文，为此让整个操作失败没有意义。
+     * 水位（archived_upto）只在摘要真正落库后推进，失败不丢历史。
+     */
+    private fun compactSession(ex: Exchange, sid: String) {
+        if (store.getSession(sid) == null) return ex.respond(404, JSON, "{\"error\":\"会话不存在\"}")
+        val keep = bodyJson(ex).optInt("keep", 10)
+        ex.respond(200, JSON, agent.compact(sid, keep).toString())
     }
 
     private fun health(ex: Exchange) {
@@ -311,6 +346,7 @@ class ApiRouter(
     private fun diagnostics(ex: Exchange) {
         val env = DeviceEnv(context, store, "")
         val battery = try { ToolRegistry.byName("get_battery")!!.handler(JSONObject(), env).has("error").not() } catch (_: Exception) { false }
+        val shell = try { ToolRegistry.byName("run_shell") != null } catch (_: Exception) { false }
         ex.respond(
             200, JSON,
             JSONObject()
@@ -321,11 +357,115 @@ class ApiRouter(
                     .put("chat", "ok")
                     .put("tools", "ok")
                     .put("battery", if (battery) "ok" else "unavailable")
-                    .put("shell", "unavailable")
-                    .put("scheduler", "unavailable"))
-                .put("note", "run_shell/定时任务在原生引擎上不可用；需要时安装 Termux 版")
+                    // 原生 shell 走 /system/bin/sh，身份是 app uid（非 root、非 Termux）
+                    .put("shell", if (shell) "restricted" else "unavailable")
+                    .put("scheduler", "ok")
+                    .put("scheduler_exact", if (scheduler.canScheduleExact()) "ok" else "inexact")
+                    .put("undo", "ok"))
+                .put("note", "shell 以 app 身份运行 /system/bin/sh（无 root、无 pkg/apt）；" +
+                    "定时任务用 AlarmManager，未授予精确闹钟权限时可能延迟数分钟")
                 .toString()
         )
+    }
+
+    // ---------- 定时任务 ----------
+
+    private fun createJob(ex: Exchange) {
+        val body = bodyJson(ex)
+        val name = body.optString("name").trim().take(60)
+        val tt = body.optString("trigger_type").trim()
+        val expr = body.optString("expr").trim()
+        val message = body.optString("message").trim()
+        if (name.isEmpty() || tt !in setOf("cron", "interval", "date") || expr.isEmpty() || message.isEmpty()) {
+            return ex.respond(400, JSON,
+                "{\"error\":\"缺少必要字段：name / trigger_type(cron|interval|date) / expr / message\"}")
+        }
+        val validation = validateExpr(tt, expr)
+        if (validation != null) return ex.respond(400, JSON, JSONObject().put("error", validation).toString())
+        val cond = body.optString("condition").trim()
+        if (cond.isNotEmpty() && !Regex("^\\s*battery\\s*(<=|>=|==|<|>)\\s*[0-9.]+\\s*$", RegexOption.IGNORE_CASE).matches(cond)) {
+            return ex.respond(400, JSON, "{\"error\":\"条件格式：battery < 20（仅支持电池电量阈值）\"}")
+        }
+        val job = store.insertJob(JSONObject()
+            .put("name", name).put("trigger_type", tt).put("expr", expr).put("message", message)
+            .put("session_id", body.optString("session_id")).put("condition", cond)
+            .put("enabled", body.optBoolean("enabled", true)))
+        scheduler.armJob(job.optString("id"))
+        ex.respond(200, JSON, withNextRun(job).toString())
+    }
+
+    /** `/api/jobs/{id}` 的 PUT / DELETE，以及 `/api/jobs/{id}/run`。 */
+    private fun jobDetail(ex: Exchange, path: String) {
+        val rest = path.removePrefix("/api/jobs/")
+        val id = rest.substringBefore("/")
+        if (id.isEmpty()) return ex.respond(404, JSON, "{\"error\":\"任务不存在\"}")
+        val runNow = rest.endsWith("/run")
+        val existing = store.getJob(id) ?: return ex.respond(404, JSON, "{\"error\":\"任务不存在\"}")
+        when {
+            runNow && ex.method == "POST" -> {
+                scheduler.runNow(existing)
+                ex.respond(200, JSON, JSONObject().put("ok", true).put("job_id", id).toString())
+            }
+            ex.method == "PUT" -> {
+                val patch = bodyJson(ex)
+                if (patch.length() == 0) return ex.respond(400, JSON, "{\"error\":\"请求体不能为空\"}")
+                val tt = if (patch.has("trigger_type")) patch.optString("trigger_type") else existing.optString("trigger_type")
+                val expr = if (patch.has("expr")) patch.optString("expr") else existing.optString("expr")
+                if (patch.has("expr") || patch.has("trigger_type")) {
+                    val v = validateExpr(tt, expr)
+                    if (v != null) return ex.respond(400, JSON, JSONObject().put("error", v).toString())
+                }
+                val updated = store.updateJob(id, patch) ?: return ex.respond(404, JSON, "{\"error\":\"任务不存在\"}")
+                if (updated.optBoolean("enabled")) scheduler.armJob(id) else scheduler.cancel(id)
+                ex.respond(200, JSON, withNextRun(updated).toString())
+            }
+            ex.method == "DELETE" -> {
+                scheduler.cancel(id)
+                ex.respond(200, JSON, JSONObject().put("ok", store.deleteJob(id)).toString())
+            }
+            else -> ex.respond(404, JSON, "{\"error\":\"not_found\"}")
+        }
+    }
+
+    private fun applyRecipe(ex: Exchange, recipeId: String) {
+        val recipe = Recipes.get(recipeId)
+            ?: return ex.respond(404, JSON, "{\"error\":\"配方不存在\"}")
+        val job = store.insertJob(JSONObject()
+            .put("name", recipe.optString("name"))
+            .put("trigger_type", recipe.optString("trigger_type"))
+            .put("expr", recipe.optString("expr"))
+            .put("message", recipe.optString("message"))
+            .put("condition", recipe.optString("condition"))
+            .put("enabled", recipe.optBoolean("enabled", true)))
+        scheduler.armJob(job.optString("id"))
+        ex.respond(200, JSON, withNextRun(job).toString())
+    }
+
+    private fun withNextRun(job: JSONObject): JSONObject {
+        val out = JSONObject(job.toString())
+        val next = if (job.optBoolean("enabled")) scheduler.nextRunAt(job) else null
+        out.put("next_run", if (next != null) {
+            java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+                .format(java.util.Date(next))
+        } else JSONObject.NULL)
+        return out
+    }
+
+    /** 表达式校验：与 Python routes.validate_job_payload 的规则保持一致。 */
+    private fun validateExpr(tt: String, expr: String): String? = when (tt) {
+        "interval" -> {
+            val v = expr.toDoubleOrNull()
+            if (v == null || v.isNaN() || v.isInfinite() || v <= 0 || v > 365.0 * 86400) {
+                "interval 表达式需为 1~31536000 之间的秒数（如 3600）"
+            } else null
+        }
+        "date" -> {
+            val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
+            fmt.isLenient = false
+            try { fmt.parse(expr); null } catch (_: Exception) { "date 表达式格式：YYYY-MM-DD HH:MM" }
+        }
+        "cron" -> if (CronExpr.parse(expr) == null) "cron 表达式无法解析（需 5 字段：分 时 日 月 周）" else null
+        else -> "trigger_type 必须是 cron / interval / date"
     }
 
     private fun stats(ex: Exchange) {

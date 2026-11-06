@@ -90,7 +90,9 @@ class Exchange(
     }
 
     private fun urlDecode(s: String): String = try {
-        URLDecoder.decode(s, StandardCharsets.UTF_8)
+        // 不能用 URLDecoder.decode(String, Charset)：那个重载要 API 33，
+        // minSdk 是 26，旧机上会 NoSuchMethodError。带 charset 名的版本从 API 1 就在。
+        URLDecoder.decode(s, StandardCharsets.UTF_8.name())
     } catch (_: IllegalArgumentException) {
         s
     }

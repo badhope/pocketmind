@@ -195,8 +195,8 @@ export function saveTextFile(fileName: string, content: string): string | null {
 /**
  * 电池优化是否已豁免。
  *
- * Android 的 Doze 在锁屏后限制后台网络与 CPU —— agentd 跑在 Termux 里，
- * 一旦被冻结，SSE 断开、定时任务不触发、审批提醒收不到。
+ * Android 的 Doze 在锁屏后限制后台网络与 CPU —— 无论后端跑在 APK 进程内
+ * 还是 Termux 里，被冻结就意味着 SSE 断开、定时任务不触发、审批提醒收不到。
  * 非壳环境返回 true（浏览器没有这个概念，不显示引导）。
  */
 export function isBatteryOptimizationIgnored(): boolean {

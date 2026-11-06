@@ -2,14 +2,14 @@
   <img src="assets/pocketmind-logo.png" width="440" alt="PocketMind Logo" />
   <h1>PocketMind</h1>
   <p><b>The always-on agent that actually operates your phone.</b><br/>
-  Runs on the device · 41 tools · Server-enforced approval · Local-first storage</p>
+  One APK, no Termux · Server-enforced approval · Local-first storage</p>
   <img src="assets/badges/gate.svg" alt="Local gate" />
   <img src="assets/badges/platform.svg" alt="Platform" />
-  <img src="assets/badges/tools.svg" alt="41 tools" />
+  <img src="assets/badges/tools.svg" alt="Tools" />
   <img src="assets/badges/language.svg" alt="Language" />
   <img src="assets/badges/license.svg" alt="License" />
   <br />
-  <sub>Web UI · PWA · APK · MCP server + client · Telegram gateway · Scheduled recipes · Plan/Act modes · Backup &amp; restore</sub>
+  <sub>Standalone APK · Native engine · Streaming chat · Approval center · Sessions &amp; backup · Plan/Act modes</sub>
 </div>
 
 **English** | [简体中文](README.zh-CN.md)
@@ -26,9 +26,11 @@ files — as structured tools, and it asks you before it does anything destructi
 Everything it remembers stays on the device. Only inference leaves it.
 
 ```
-You ──▶ Web UI / PWA / APK ──▶ agentd (Python, single process) ──▶ tools ──▶ your phone
-                                        │
-                                        └──▶ your LLM endpoint (inference only)
+You ──▶ APK ──▶ Kotlin native engine ──▶ 37 native tools ──▶ your phone
+                        │
+                        └──▶ your LLM endpoint (inference only)
+
+Full runtime (optional): Web UI / PWA ──▶ agentd (Python, Termux) ──▶ 41 tools
 ```
 
 ## See it work
@@ -41,6 +43,12 @@ runtime statistics → scheduled jobs → dark theme → mobile viewport.
 Full video: [docs/demo/pocketmind-demo.mp4](docs/demo/pocketmind-demo.mp4) (40 s).</sub>
 
 ## The parts that matter
+
+> Scope: approvals, structured results, backups, Plan/Act, usage stats, the
+> scheduler, shell and undo exist in both runtimes. The standalone APK ships 37
+> native tools. Only **MCP, the Telegram gateway, the skills directory and the
+> subagent** are Termux-only; unsupported capabilities are reported explicitly
+> instead of faking success.
 
 ### Approval is a security boundary, not a dialog
 
@@ -62,6 +70,11 @@ way past it, and a compromised page cannot either.
 </p>
 
 ### 41 tools across the phone
+
+> The table below describes the Termux runtime (41 = 39 built-in plus the
+> `remember_fact` / `read_skill` tools registered at startup). The standalone APK
+> covers most of them with 37 native tools; the difference is the "three things it
+> cannot do" listed under honest boundaries.
 
 | Group | Count | Examples |
 |---|---|---|
@@ -95,19 +108,26 @@ did not succeed.
   to the reply. Copy is one tap away.</sub>
 </p>
 
-### It runs without a laptop
+### Install it and go
 
-The built `dist/` ships in the repository, so the phone needs no Node toolchain.
-`termux/install.sh` installs Python and the dependencies once; `termux/start.sh`
-starts the service; `boot.sh` restarts it on boot. Works as a PWA, or install the
-APK for an app icon, a foreground service and a native clipboard bridge.
+Since 1.4.0 the APK ships the native engine and a prebuilt frontend: install it,
+open it, configure a provider, and start chatting. No Termux, Python or Node on the
+phone. Termux is only needed for the full 41-tool runtime: `termux/install.sh`
+installs dependencies, `termux/start.sh` starts the service, `boot.sh` restarts it
+on boot.
 
 ### Scheduled work that survives a reboot
 
-Jobs persist in SQLite and are restored on startup. Triggers are `interval`,
-`cron`, or a **battery condition** (`battery < 20`). Four recipes ship built in —
+`AlarmManager` in the APK, APScheduler under Termux; both persist jobs in SQLite.
+Triggers are `interval`, `cron` (5-field, with ranges/lists/steps) and one-shot
+`date`, plus a **battery condition** (`battery < 20`). Four recipes ship built in —
 low-battery alert, daily summary, daily weather, lunch reminder — and any of them
-instantiates with one tap. Jobs can be run immediately without waiting for the
+instantiates with one tap.
+
+Three things that are easy to fake and are done for real here: **it still fires
+when the screen is locked** (`setExactAndAllowWhileIdle` across Doze), **alarms are
+re-armed after a reboot** (`BOOT_COMPLETED`), and **the next occurrence is
+scheduled on fire**. Jobs can also run immediately without waiting for the
 trigger, which is the only way to know a job actually works.
 
 <p align="center">
@@ -161,9 +181,12 @@ limits:
   real Android phone with `termux-api`. Chat, files, memory, todos and the scheduler
   work anywhere. Check [docs/capability-matrix.md](docs/capability-matrix.md) or
   `GET /api/diagnostics` on your device.
-- **The APK ships a native Kotlin engine (since 1.4.0).** Core features run
-  without Termux; a fully native Android scheduler, MCP and Termux-provider
-  bridge are the 1.5 slices — see [ROADMAP.md](ROADMAP.md).
+- **The APK ships a native Kotlin engine (since 1.4.0; scheduler and shell since
+  1.5.0).** Core features run without Termux. MCP, the Telegram gateway and the
+  skills directory stay Termux-only — see [ROADMAP.md](ROADMAP.md).
+- **The native shell is not Termux.** `run_shell` runs `/system/bin/sh` as the
+  app's own uid: no root, no `pkg`/`apt`, only the toybox command subset, no
+  Python or Node. Diagnostics reports it as `restricted`, not `ok`.
 
 ## Install
 
@@ -178,10 +201,12 @@ bash scripts/build-apk.sh --release  # unsigned unless keystore.properties is pr
 ```
 
 What the native engine covers today: chat (SSE), all three permission modes,
-server-enforced approvals, 26 phone/file/knowledge tools via Android APIs,
-sessions, export/import, search. What it deliberately does not do yet (the app
-says so explicitly instead of faking it): shell commands, scheduled jobs, MCP,
-Telegram. For those, use Option B.
+server-enforced approvals, 37 phone/file/knowledge/system tools via Android
+APIs, sessions, export/import, search, a real `/system/bin/sh`, and scheduled
+jobs (AlarmManager with cron/interval/one-shot triggers that survive screen
+lock and reboot), plus undoable file writes and deletes. What stays Termux-only
+(the app says so explicitly instead of faking it): MCP, the Telegram gateway,
+the skills directory and the subagent. For those, use Option B.
 
 ### Option B — on your phone with Termux (full 41-tool runtime)
 

@@ -75,11 +75,19 @@ Gitee `gitee.com/badhope/pocketmind`（remote `gitee`）、GitHub
 `badhope/pocketmind`（`gh-badhope`）。五处内容应保持一致（同一 tree），
 **push 到 gitcode 后同步其余镜像**：`git push <remote> main --tags`（`latest` 标签需 `--force`）。
 GitHub 各账号的 PAT 由用户在会话中提供，未存入仓库配置——推送用一次性 URL 或凭据管理器；
-本机代理的 schannel TLS 对 github.com 偶发握手失败，遇错可改用 GitHub REST API
-（POST /git/tags + /git/refs）补推附注标签。仓库内已无 `.github/workflows`。
+本机代理对 github.com 的 git TLS 持续拦截（schannel/openssl 均失败），但 api.github.com 的
+curl/urllib 可用。**GitHub 三仓的推送走 Git Data API**（blob→tree→commit→PATCH ref，
+脚本见会话记录 /tmp/gh_push2.py 模式；blob 内容寻址可安全重试）。因此 GitHub 镜像的
+提交 SHA 与本地不同（内容树一致，v1.4.0 已九项抽查验证），**下次 git push 会 non-fast-forward，
+需要 --force**；主发布提交在 gitcode/gitee 为本地 SHA（v1.4.0 = 3ab87db）。仓库内已无 `.github/workflows`。
 
 ## 版本
 
+- v1.4.0（2026-11-03）：**APK 独立运行（Kotlin 原生引擎）**。不装 Termux 即可用：
+  进程内 HTTP/SSE（导航许可 + cookie 会话）、SQLite、Agent 循环 + 审批（五决策 + 全局名单）、
+  26 个原生工具；run_shell/调度器/MCP 显式降级。前端 dist 随构建打进 APK assets
+  （syncWebDist 任务）。契约测试：termux/apk-shell 的 EngineContractTest（12 例，共 34 单测）。
+  构建注意：GRADLE_USER_HOME 用仓库 .gradle-home（用户级 init 脚本有 BOM 会挂）。
 - v1.3.0（2026-11-03）：首次运行引导向导、跨工具输出搜索（命中带 matched 类型）、
   结构化工具结果查看器、导出 format_version、mypy 清零并入门禁。
 - 门禁注意事项：本机代理 Fake-IP DNS 会把 example.com 解析到 198.18.0.32（保留段），

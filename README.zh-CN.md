@@ -2,14 +2,14 @@
   <img src="assets/pocketmind-logo.png" width="440" alt="PocketMind Logo" />
   <h1>PocketMind · 口袋智灵</h1>
   <p><b>真正能操作你手机的常驻 Agent</b><br/>
-  运行在设备内 · 41 个工具 · 服务端强制审批 · 本地优先存储</p>
+  装一个 APK 即可运行 · 无需 Termux · 服务端强制审批 · 数据留在本机</p>
   <img src="assets/badges/gate.svg" alt="本地门禁" />
-  <img src="assets/badges/platform.svg" alt="Platform" />
-  <img src="assets/badges/tools.svg" alt="41 tools" />
-  <img src="assets/badges/language.svg" alt="Language" />
-  <img src="assets/badges/license.svg" alt="License" />
+  <img src="assets/badges/platform.svg" alt="运行平台" />
+  <img src="assets/badges/tools.svg" alt="工具数量" />
+  <img src="assets/badges/language.svg" alt="开发语言" />
+  <img src="assets/badges/license.svg" alt="开源许可" />
   <br />
-  <sub>Web UI · PWA · APK · MCP 服务端与客户端 · Telegram 网关 · 定时配方 · Plan/Act 双模式 · 备份恢复</sub>
+  <sub>独立 APK · 原生引擎 · 流式对话 · 审批中心 · 会话与备份 · Plan/Act 双模式</sub>
 </div>
 
 [English](README.md) | **简体中文**
@@ -25,9 +25,11 @@
 它记住的一切都留在设备上。离开设备的只有推理请求。
 
 ```
-你 ──▶ Web UI / PWA / APK ──▶ agentd（Python 单进程）──▶ 工具 ──▶ 你的手机
-                                      │
-                                      └──▶ 你配置的 LLM 端点（仅推理）
+你 ──▶ APK ──▶ Kotlin 原生引擎 ──▶ 37 个原生工具 ──▶ 你的手机
+                     │
+                     └──▶ 你配置的 LLM 端点（仅推理）
+
+完整运行时（可选）：Web UI / PWA ──▶ agentd（Python，Termux）──▶ 41 个工具
 ```
 
 ## 看它跑起来
@@ -39,6 +41,11 @@
 完整视频：[docs/demo/pocketmind-demo.mp4](docs/demo/pocketmind-demo.mp4)（40 秒）。</sub>
 
 ## 真正重要的部分
+
+> 范围说明：审批、结构化结果、备份、Plan/Act、用量统计、**定时任务、shell、撤销**
+> 在 APK 与 Termux 两个运行时都有。独立 APK 提供 **37 个原生工具**；
+> 只有 **MCP、Telegram 网关、技能目录、子代理** 属于 Termux 专属，
+> 未覆盖的能力会明确返回"不可用"，不会假装成功。
 
 ### 审批是安全边界，不是弹窗
 
@@ -57,6 +64,9 @@
 </p>
 
 ### 覆盖手机的 41 个工具
+
+> 下表是 Termux 完整运行时（41 = 39 内置 + `remember_fact`/`read_skill` 两个运行时注册）。
+> 独立 APK 的 37 个原生工具覆盖其中绝大多数；差额是上面「有三件事做不到」里的那几项。
 
 | 分组 | 数量 | 例子 |
 |---|---|---|
@@ -88,17 +98,22 @@
   <sub>上面是工具入参，下面是结构化结果，回复附带耗时与 token 消耗。一键复制。</sub>
 </p>
 
-### 不需要电脑也能跑
+### 装上就能用
 
-构建好的 `dist/` 随仓库分发，手机端不需要 Node 工具链。`termux/install.sh` 一次性
-装好 Python 与依赖，`termux/start.sh` 启动服务，`boot.sh` 开机自启。可以用 PWA，
-也可以装 APK 获得独立图标、前台服务与原生剪贴板桥。
+1.4.0 起 APK 自带原生引擎与已构建的前端，装完打开即可配置使用，**不需要 Termux、
+Python 或 Node**。需要完整 41 工具运行时时才用 Termux：`termux/install.sh` 装依赖、
+`termux/start.sh` 启动、`boot.sh` 开机自启。
 
 ### 重启也不会丢的定时任务
 
-任务落在 SQLite，启动时恢复。触发器支持 `interval`、`cron`，以及**电量条件**
-（`battery < 20`）。内置四个配方——低电量提醒、每日总结、每日天气、午餐提醒——
-一键实例化。任务可以「立即执行」，不必等触发点，这也是确认任务真的能跑通的唯一办法。
+APK 里是 `AlarmManager`，Termux 里是 APScheduler，两条路都把任务落在 SQLite。
+触发器支持 `interval`、`cron`（5 字段，含区间/列表/步长）与一次性 `date`，
+外加**电量条件**（`battery < 20`）。内置四个配方——低电量提醒、每日总结、
+每日天气、午餐提醒——一键实例化。
+
+关键是三个容易被糊弄的点，这里都做了：**锁屏后照样触发**（`setExactAndAllowWhileIdle`
+撑过 Doze）、**重启后自动重排**（`BOOT_COMPLETED` 重放全部闹钟）、**触发后自动排下一次**。
+任务可以「立即执行」，不必等触发点，这也是确认任务真的能跑通的唯一办法。
 
 <p align="center">
   <img src="assets/screenshots/07-timers.png" width="880" alt="定时任务与配方模板" />
@@ -139,11 +154,18 @@
 - **`run_shell` 是任意代码执行**，一旦批准就生效。看清命令再点。
 - **局域网模式**（`--lan`）意味着任何拿到令牌的设备都能调用全部端点，包括 shell。
   无令牌时它拒绝启动。不要在不可信网络开启；公网暴露请在前面加 HTTPS（见 `DEPLOY.md`）。
-- **设备能力有差异。** 短信、电话、定位、传感器、电量、相机需要真机 + `termux-api`。
+- **设备能力有差异。** 短信、电话、定位、传感器、电量、相机需要真机；
+  Termux 运行时经 `termux-api`，原生运行时直接走 Android API。
   聊天、文件、记忆、清单与调度在任何环境都能用。查
   [docs/capability-matrix.md](docs/capability-matrix.md) 或在设备上跑 `GET /api/diagnostics`。
-- **APK 自带原生 Kotlin 引擎（1.4.0 起）。** 核心功能不装 Termux 即可用；
-  原生调度器、MCP 与 Termux 可选桥是 1.5 的切片——见 [ROADMAP.md](ROADMAP.md)。
+- **原生 shell 不是 Termux。** `run_shell` 跑 `/system/bin/sh`，身份是应用自己的 uid：
+  没有 root、没有 `pkg`/`apt`、只有 toybox 的命令子集、没有 Python/Node。
+  诊断页把它标成 `restricted` 而不是 `ok`。
+- **有三件事做不到，且不打算做。** 应用内开关 WiFi（Android 10+ 禁止）、
+  离线 TTS 模型（数百 MB）、`subagent`（成本权衡）。见
+  [ROADMAP.md](ROADMAP.md) 的「Not planned — platform limits」。
+- **APK 自带原生 Kotlin 引擎（1.4.0 起，1.5.0 补齐调度与 shell）。** 核心功能不装 Termux 即可用；
+  MCP、Telegram 与技能目录仍是 Termux 专属——见 [ROADMAP.md](ROADMAP.md)。
 
 ## 安装
 
@@ -157,10 +179,16 @@ bash scripts/build-apk.sh            # debug APK，已校验、可直接安装
 bash scripts/build-apk.sh --release  # 没有 keystore.properties 时是未签名件
 ```
 
-原生引擎当前覆盖：对话（SSE）、三种权限模式、服务端强制审批、26 个
-手机/文件/知识库工具（Android API 直调）、会话、导出导入、搜索。
-暂未覆盖且会**明确告知**（不伪成功）：shell 命令、定时任务、MCP、Telegram。
-需要这些请用方案 B。
+原生引擎当前覆盖：对话（SSE）、三种权限模式、服务端强制审批、37 个
+手机/文件/知识库/系统工具（Android API 直调）、会话、导出导入、搜索、
+定时任务（AlarmManager + cron/间隔/一次性，锁屏与重启后仍生效）、
+文件写删的可撤销备份、开机自启。仍属 Termux 专属并会**明确告知**
+（不伪成功）：MCP、Telegram 网关、技能目录、子代理。需要这些请用方案 B。
+
+> **原生 shell 的边界**：`run_shell` 跑的是系统的 `/system/bin/sh`，身份是
+> 应用自己的 uid——没有 root，没有 `pkg`/`apt`，只有 toybox 提供的命令子集，
+> 也没有 Python/Node。能做的事很多（文件、文本处理、调用系统二进制），
+> 但不要期待一个 Termux 环境。诊断页会把它标成 `restricted` 而不是 `ok`。
 
 ### 方案 B —— Termux 完整 41 工具运行时
 

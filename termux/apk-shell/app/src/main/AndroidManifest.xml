@@ -9,10 +9,23 @@
     <!-- 原生工具所需权限（运行时按工具逐项检查，未授予时返回结构化错误而非崩溃） -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- scan_wifi 读 WifiManager.getScanResults 需要它；漏了会 SecurityException -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
+
+    <!--
+      相机 / 电话 / 短信相关的 uses-feature 全部 required=false：
+      不声明时 Google Play 会按权限反推「必须支持该硬件」，把这些设备
+      （平板、ChromeOS、部分无通话平板）直接过滤掉。本应用缺这些硬件时
+      对应工具会返回 permission_required 或 hardware_unavailable，其余功能照常。
+    -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
 
     <!-- Android 13+ 通知权限：审批提醒、定时任务到达 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"
@@ -36,6 +49,17 @@
     <queries>
         <package android:name="com.termux" />
     </queries>
+
+    <!--
+      定时任务：AlarmManager 精确闹钟（Android 12+ 必须显式声明）。
+      Android 14 起新装应用默认不给 SCHEDULE_EXACT_ALARM，所以运行时要查
+      canScheduleExactAlarms()，未授予则降级 setAndAllowWhileIdle（可能延迟数分钟）。
+    -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        tools:targetApi="31" />
+
+    <!-- 开机自启：重启后恢复前台引擎与定时任务（系统默认不会拉起任何应用） -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!--
       电池优化豁免：Android 的 Doze/App Standby 会在锁屏后冻结后台进程，
@@ -105,6 +129,25 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="local_agent_engine" />
         </service>
+
+        <!-- 定时任务触发：AlarmManager → 广播 → 后台线程跑 Agent -->
+        <receiver
+            android:name=".runtime.JobAlarmReceiver"
+            android:exported="false" />
+
+        <!--
+          开机自启：重启后把前台引擎与定时任务恢复回来。
+          exported=false 仍能收到系统广播（BOOT_COMPLETED 由系统进程发出，
+          不受导出限制），同时避免第三方应用伪造该 action 拉起我们的服务。
+        -->
+        <receiver
+            android:name=".runtime.BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 </manifest>

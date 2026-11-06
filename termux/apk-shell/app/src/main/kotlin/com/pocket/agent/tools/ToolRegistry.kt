@@ -66,6 +66,40 @@ private fun unavailable(what: String, why: String): JSONObject =
     JSONObject().put("error", "$what 在原生引擎上不可用").put("error_code", "capability_unavailable")
         .put("hint", why)
 
+/** 区分真机与 JVM 单测：Android 上 Runtime.name 是 "Android"，JDK 是 "Java"/"OpenJDK"。 */
+private fun isAndroidRuntime(): Boolean =
+    System.getProperty("java.runtime.name").orEmpty().contains("Android", ignoreCase = true)
+
+/**
+ * 可执行文件查找：Android 上 shell 在 /system/bin/sh。
+ *
+ * 为什么不只认 /system/bin/sh：app 进程的 PATH 由 zygote 继承，Rom 定制会改，
+ * 但 `/system/bin/sh` 是 Android 兼容性定义（CDD）要求的固定位置，所以先查它。
+ * 再回退 PATH 是为了 Robolectric 单测能在 JVM（Windows/Linux/CI）上真实跑通——
+ * 否则 `run_shell` 只能在真机验证，测试里全是 capability_unavailable。
+ */
+private fun shellBinary(): String? {    for (p in arrayOf("/system/bin/sh", "/system/bin/bash")) {
+        val f = File(p)
+        if (f.exists() && f.canExecute()) return p
+    }
+    val exts = if (System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)) {
+        listOf(".exe", ".cmd", ".bat", "")
+    } else {
+        listOf("")
+    }
+    val pathDirs = System.getenv("PATH").orEmpty().split(File.pathSeparatorChar)
+    for (dir in pathDirs) {
+        if (dir.isBlank()) continue
+        for (name in arrayOf("sh", "bash")) {
+            for (ext in exts) {
+                val f = File(dir, name + ext)
+                if (f.exists() && f.canExecute()) return f.absolutePath
+            }
+        }
+    }
+    return null
+}
+
 private fun optString(args: JSONObject, key: String, fallback: String = ""): String =
     if (args.has(key) && !args.isNull(key)) args.optString(key, fallback) else fallback
 
@@ -148,6 +182,27 @@ object ToolRegistry {
         return if (f.path.startsWith(root.path)) f else null
     }
 
+    /**
+     * 覆盖/删除前把原文件复制到 checkpoints 目录，返回撤销凭证。
+     *
+     * 返回的对象由 AgentLoop 剥离出来登记（不进工具结果），与 Python 侧
+     * `_ckpt` 约定一致：前端收到 `undoable:true` 才显示「撤销此操作」。
+     * 备份失败返回 null 而不是抛错——备份是附加能力，不能因为它让主操作失败。
+     */
+    private fun backupForUndo(env: DeviceEnv, src: File, kind: String): JSONObject? {
+        return try {
+            val dir = File(env.context.filesDir, "checkpoints")
+            if (!dir.exists() && !dir.mkdirs()) return null
+            val name = "${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(8)}_" +
+                src.name.take(60) + ".bak"
+            val dst = File(dir, name)
+            src.copyTo(dst, overwrite = true)
+            JSONObject().put("path", src.absolutePath).put("backup", dst.absolutePath).put("kind", kind)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     init {
         register(
             ToolDef(
@@ -186,8 +241,10 @@ object ToolRegistry {
             ) { args, env ->
                 val f = safeFile(env, optString(args, "path")) ?: throw ToolAbort(err("路径越界"))
                 f.parentFile?.mkdirs()
+                val ckpt = if (f.isFile) backupForUndo(env, f, "overwrite") else null
                 f.writeText(optString(args, "content"))
                 JSONObject().put("ok", true).put("path", f.name).put("chars", f.length())
+                    .also { if (ckpt != null) it.put("_ckpt", ckpt) }
             }
         )
         register(
@@ -197,7 +254,9 @@ object ToolRegistry {
             ) { args, env ->
                 val f = safeFile(env, optString(args, "path")) ?: throw ToolAbort(err("路径越界"))
                 if (!f.isFile) throw ToolAbort(err("文件不存在：${f.name}"))
+                val ckpt = backupForUndo(env, f, "restore")
                 JSONObject().put("ok", f.delete()).put("path", f.name)
+                    .also { if (ckpt != null) it.put("_ckpt", ckpt) }
             }
         )
         register(
@@ -661,7 +720,13 @@ object ToolRegistry {
                 "speech_to_text", "语音转文字。", "safe", "语音转文字", "phone",
                 emptySchema
             ) { _, _ ->
-                unavailable("语音识别", "原生引擎 v1 未内置识别器；可改用输入法的语音输入")
+                // 系统识别器要么内置（Google/厂商），要么没有；没有时如实说明，
+                // 不伪装成"正在听"。识别需要界面与麦克风焦点，只能由 Activity 拉起，
+                // 所以这里返回一条指引而不是阻塞等待（服务里拿不到前台焦点）。
+                unavailable(
+                    "语音识别",
+                    "系统语音识别需要在前台界面发起；请在输入框用键盘的语音键，或安装带识别器的输入法"
+                )
             }
         )
         register(
@@ -672,7 +737,36 @@ object ToolRegistry {
                 if (env.context.checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                     throw ToolAbort(needPermission("相机"))
                 }
-                throw ToolAbort(unavailable("拍照", "原生引擎 v1 未内置相机管线，将在后续版本提供"))
+                // 后台服务不能直接持有 Camera2 会话（没有 Surface 与前台生命周期），
+                // 但可以走系统相机 Intent 让用户拍。
+                // 输出 URI 用 MediaStore 而不是 FileProvider：本工程运行时零第三方依赖，
+                // androidx.core 的 FileProvider 不在 classpath，引入它会为了一个拍照功能
+                // 把 APK 加上一整套 AndroidX。
+                val name = optString(args, "path", "pocketmind-${System.currentTimeMillis()}.jpg")
+                    .substringAfterLast('/').ifEmpty { "pocketmind.jpg" }
+                val resolver = env.context.contentResolver
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, name)
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                            android.os.Environment.DIRECTORY_PICTURES + "/PocketMind")
+                    }
+                }
+                val uri = try {
+                    resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                } catch (e: Exception) {
+                    null
+                } ?: throw ToolAbort(err("无法创建照片文件：${name}"))
+                val intent = android.content.Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                    putExtra(android.provider.MediaStore.EXTRA_OUTPUT, uri)
+                    addFlags(android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                env.context.startActivity(intent)
+                JSONObject().put("ok", true).put("started", true)
+                    .put("path", name)
+                    .put("hint", "系统相机已打开；拍完照片会存进相册的 PocketMind 目录")
             }
         )
 
@@ -724,17 +818,15 @@ object ToolRegistry {
             }
         )
 
-        // ═══════════════ Termux 专属：显式不可用（不伪迁移） ═══════════════
+        // ═══════════════ 系统：原生 shell（受限，但不是假的） ═══════════════
 
         register(
             ToolDef(
-                "run_shell", "执行一条 shell 命令。", "danger", "执行命令", "system",
-                schema("command" to ("string" to true))
-            ) { _, _ ->
-                unavailable(
-                    "run_shell",
-                    "原生引擎没有 shell；需要 shell 时请安装 Termux 版（仓库 termux/install.sh）"
-                )
+                "run_shell", "执行一条 shell 命令（app 权限，工作目录在应用私有 home）。", "danger",
+                "执行命令", "system",
+                schema("command" to ("string" to true), "timeout" to ("integer" to false))
+            ) { args, env ->
+                runShell(args, env)
             }
         )
         register(
@@ -799,6 +891,76 @@ object ToolRegistry {
         val m = Regex("charset=([\\w-]+)", RegexOption.IGNORE_CASE).find(contentType)?.groupValues?.get(1)
         return try { java.nio.charset.Charset.forName(m ?: "UTF-8") } catch (_: Exception) { Charsets.UTF_8 }
     }
+
+    /**
+     * run_shell 的原生实现：`/system/bin/sh -c`，工作目录固定在应用私有 filesDir。
+     *
+     * 与 Termux 版的差别必须说清楚，不能让人误以为拿到了 root 或 Termux 环境：
+     *  - 身份是 app 自己（uid 由安装分配），只能碰应用有权限的路径；
+     *  - 没有 busybox/coreutils 全家桶，只有 toybox 提供的子集；
+     *  - 不能 apt/pkg 装包，也没有 Python/Node。
+     * 这三条是 Android 沙箱决定的，不是实现缺陷。
+     */
+    private fun runShell(args: JSONObject, env: DeviceEnv): JSONObject {
+        val command = optString(args, "command")
+        if (command.isBlank()) throw ToolAbort(err("command 不能为空"))
+        val sh = shellBinary() ?: return unavailable("run_shell", "系统未提供 /system/bin/sh")
+        val timeoutSec = optInt(args, "timeout", 60).coerceIn(1, 300)
+        val home = env.context.filesDir.also { it.mkdirs() }
+
+        val proc = try {
+            ProcessBuilder(sh, "-c", command)
+                .directory(home)
+                .redirectErrorStream(false)
+                .apply {
+                    // 只在 Android 上重设 PATH：zygote 的 PATH 不含 toybox 常用目录，
+                    // 保留会让 `ls` 这类命令在部分 ROM 上找不到。
+                    // JVM 单测（Robolectric）里不能覆盖，否则连 sh 自己都定位不到依赖。
+                    if (isAndroidRuntime()) {
+                        environment()["PATH"] = "/system/bin:/system/xbin:/vendor/bin"
+                    }
+                    environment()["HOME"] = home.absolutePath
+                    environment()["TMPDIR"] = env.context.cacheDir.absolutePath
+                }
+                .start()
+        } catch (e: Exception) {
+            return err("启动 shell 失败：${e.message}")
+        }
+
+        val out = StringBuilder()
+        val errBuf = StringBuilder()
+        val outThread = Thread {
+            try { proc.inputStream.bufferedReader().use { r -> r.forEachLine { if (out.length < MAX_SHELL_OUTPUT) out.append(it).append('\n') } } } catch (_: Exception) {}
+        }
+        val errThread = Thread {
+            try { proc.errorStream.bufferedReader().use { r -> r.forEachLine { if (errBuf.length < MAX_SHELL_OUTPUT) errBuf.append(it).append('\n') } } } catch (_: Exception) {}
+        }
+        outThread.start(); errThread.start()
+
+        val finished = proc.waitFor(timeoutSec.toLong(), java.util.concurrent.TimeUnit.SECONDS)
+        if (!finished) {
+            // 超时：先正常终止，再强杀，最后等两个读线程退出，避免 fd 泄漏。
+            proc.destroy()
+            if (!proc.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) proc.destroyForcibly()
+        }
+        outThread.join(2000)
+        errThread.join(2000)
+        val code = if (finished) proc.exitValue() else -1
+
+        val result = JSONObject()
+            .put("ok", finished && code == 0)
+            .put("exit_code", code)
+            .put("stdout", out.toString().take(MAX_SHELL_OUTPUT))
+            .put("stderr", errBuf.toString().take(MAX_SHELL_OUTPUT))
+        if (!finished) {
+            result.put("timed_out", true)
+                .put("error", "命令超时（${timeoutSec}s），已终止")
+                .put("error_code", "timeout")
+        }
+        return result
+    }
+
+    private const val MAX_SHELL_OUTPUT = 30000
 }
 
 /** * SSRF 防护（与 Python 侧语义一致）：仅 http/https；解析后拒绝回环 / 私有 /

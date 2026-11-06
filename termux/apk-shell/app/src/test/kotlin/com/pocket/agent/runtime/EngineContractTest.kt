@@ -47,6 +47,8 @@ class EngineContractTest {
     /** 脚本化假 LLM：不碰网络，逐轮弹出脚本。 */
     class FakeLlm(cfg: SettingsStore.LlmConfig) : LlmClient(cfg) {
         val turns = ArrayDeque<FakeTurn>()
+        /** 最近一次 streamChat 收到的完整 messages，用于断言上下文注入。 */
+        var lastMessages: List<JSONObject> = emptyList()
 
         override fun streamChat(
             messages: JSONArray,
@@ -55,6 +57,7 @@ class EngineContractTest {
             callbacks: StreamCallbacks,
             abortSignal: () -> Boolean,
         ): List<Triple<String, String, String>> {
+            lastMessages = (0 until messages.length()).mapNotNull { messages.optJSONObject(it) }
             val turn = turns.removeFirstOrNull() ?: FakeTurn("(脚本耗尽)")
             turn.text?.let { callbacks.onText(it) }
             callbacks.onDone(LlmClient.Usage(10, 5, false), turn.calls)
@@ -77,9 +80,9 @@ class EngineContractTest {
         AgentLoop.appContext = { context }
         fakeLlm = FakeLlm(SettingsStore.LlmConfig("http://fake.local", "sk-test", "fake-model", 0.7, 2048))
         val loop = AgentLoop(store, settings, approval) { fakeLlm }
-        router = ApiRouter(context, store, settings, approval, loop) {
+        router = ApiRouter(context, store, settings, approval, loop, {
             engine?.takeIf { it.state == EngineState.RUNNING }
-        }
+        }, NativeScheduler(context, store, loop))
         engine = NativeEngine(0, router)
         assertTrue("引擎应启动成功", engine.start())
     }
@@ -323,6 +326,253 @@ class EngineContractTest {
     @Test
     fun `未实现的 api 路径 fail-closed 503`() {
         bootstrap()
+        assertEquals(503, get("/api/never-implemented").code)
+    }
+
+    // ---------- 定时任务（1.5：原生 AlarmManager 调度） ----------
+
+    @Test
+    fun `定时任务 CRUD - 创建校验表达式与非法输入`() {
+        bootstrap()
+        // 缺字段 → 400
+        assertEquals(400, send("POST", "/api/jobs", "{}").code)
+        // 非法 cron → 400
+        assertEquals(400, send("POST", "/api/jobs", JSONObject()
+            .put("name", "坏任务").put("trigger_type", "cron").put("expr", "not a cron")
+            .put("message", "x").toString()).code)
+        // 非法 interval（inf）→ 400
+        assertEquals(400, send("POST", "/api/jobs", JSONObject()
+            .put("name", "坏间隔").put("trigger_type", "interval").put("expr", "inf")
+            .put("message", "x").toString()).code)
+
+        val created = send("POST", "/api/jobs", JSONObject()
+            .put("name", "每日总结").put("trigger_type", "cron").put("expr", "0 8 * * *")
+            .put("message", "总结昨天").toString())
+        assertEquals(200, created.code)
+        val job = JSONObject(created.body)
+        val id = job.getString("id")
+        assertTrue("应算出下次触发时间", !job.isNull("next_run"))
+
+        val list = JSONObject(get("/api/jobs").body).getJSONArray("jobs")
+        assertEquals(1, list.length())
+        assertEquals("每日总结", list.getJSONObject(0).getString("name"))
+
+        val off = JSONObject(send("PUT", "/api/jobs/$id",
+            JSONObject().put("enabled", false).toString()).body)
+        assertEquals(false, off.getBoolean("enabled"))
+        assertTrue("停用后无下次触发", off.isNull("next_run"))
+
+        assertEquals(200, send("DELETE", "/api/jobs/$id", null).code)
+        assertEquals(0, JSONObject(get("/api/jobs").body).getJSONArray("jobs").length())
+        assertEquals(404, send("DELETE", "/api/jobs/$id", null).code)
+    }
+
+    @Test
+    fun `定时任务 - 配方可列出且可应用`() {
+        bootstrap()
+        val recipes = JSONObject(get("/api/recipes").body).getJSONArray("recipes")
+        assertEquals(4, recipes.length())
+        assertTrue("配方应带 applied 字段", recipes.getJSONObject(0).has("applied"))
+
+        val applied = send("POST", "/api/recipes/daily_summary/apply", "{}")
+        assertEquals(200, applied.code)
+        val job = JSONObject(applied.body)
+        assertEquals("每日总结", job.getString("name"))
+        assertEquals("0 8 * * *", job.getString("expr"))
+
+        val again = JSONObject(get("/api/recipes").body).getJSONArray("recipes")
+        val ds = (0 until again.length()).map { again.getJSONObject(it) }
+            .first { it.getString("id") == "daily_summary" }
+        assertEquals(true, ds.getBoolean("applied"))
+
+        assertEquals(404, send("POST", "/api/recipes/nope/apply", "{}").code)
+    }
+
+    @Test
+    fun `定时任务 - 立即执行一次会把消息写进会话`() {
+        bootstrap()
+        val sid = newSession()
+        val created = JSONObject(send("POST", "/api/jobs", JSONObject()
+            .put("name", "手动跑").put("trigger_type", "interval").put("expr", "3600")
+            .put("message", "现在跑一次").put("session_id", sid).toString()).body)
+        val id = created.getString("id")
+
+        assertEquals(200, send("POST", "/api/jobs/$id/run", "{}").code)
+        // 后台线程执行：轮询等 user 消息落库
+        var found = false
+        for (i in 0 until 100) {
+            Thread.sleep(100)
+            val msgs = JSONArray(get("/api/sessions/$sid/messages").body)
+            found = (0 until msgs.length()).any {
+                msgs.getJSONObject(it).getString("role") == "user" &&
+                    msgs.getJSONObject(it).getString("content") == "现在跑一次"
+            }
+            if (found) break
+        }
+        assertTrue("立即执行应把任务消息写进目标会话", found)
+    }
+
+    // ---------- 撤销（1.5：写/删前自动备份） ----------
+
+    @Test
+    fun `撤销 - 覆盖写可还原，重复撤销被拒绝`() {
+        bootstrap()
+        configureLlm(permissionMode = "auto")
+        val sid = newSession()
+        val target = java.io.File(context.filesDir, "undo-demo.txt")
+        target.writeText("原始内容")
+
+        fakeLlm.turns.addLast(FakeTurn(calls = listOf(
+            Triple("call-w1", "write_file", "{\"path\":\"undo-demo.txt\",\"content\":\"新内容\"}"))))
+        fakeLlm.turns.addLast(FakeTurn(text = "已写入"))
+        val resp = send("POST", "/api/chat",
+            JSONObject().put("session_id", sid).put("message", "改一下文件").toString())
+        assertTrue("写入应成功：${resp.body.take(200)}", resp.body.contains("\"status\":\"completed\""))
+        assertTrue("应标记可撤销", resp.body.contains("\"undoable\":true"))
+        assertEquals("新内容", target.readText())
+
+        val undone = JSONObject(send("POST", "/api/undo",
+            JSONObject().put("session_id", sid).put("tool_call_id", "call-w1").toString()).body)
+        assertTrue("撤销应成功：$undone", undone.has("ok"))
+        assertEquals("原始内容", target.readText())
+
+        val twice = JSONObject(send("POST", "/api/undo",
+            JSONObject().put("session_id", sid).put("tool_call_id", "call-w1").toString()).body)
+        assertTrue("重复撤销应报错：$twice", twice.has("error"))
+    }
+
+    @Test
+    fun `撤销 - 无备份的调用返回错误而不是崩溃`() {
+        bootstrap()
+        val r = JSONObject(send("POST", "/api/undo",
+            JSONObject().put("session_id", "nope").put("tool_call_id", "nope").toString()).body)
+        assertTrue(r.has("error"))
+        assertEquals(400, send("POST", "/api/undo", "{}").code)
+    }
+
+    // ---------- run_shell（1.5：原生 /system/bin/sh） ----------
+
+    @Test
+    fun `run_shell - 原生可执行并返回退出码与输出`() {
+        bootstrap()
+        val env = com.pocket.agent.tools.DeviceEnv(context, store, "")
+        val tool = com.pocket.agent.tools.ToolRegistry.byName("run_shell")!!
+        val r = tool.handler(JSONObject().put("command", "echo pm-shell-ok"), env)
+        assertFalse("原生 shell 不应再返回 capability_unavailable：$r",
+            r.optString("error_code") == "capability_unavailable")
+        assertEquals("退出码应为 0：$r", 0, r.optInt("exit_code", -99))
+        assertTrue("stdout 应含命令输出：$r", r.optString("stdout").contains("pm-shell-ok"))
+        assertTrue(r.optBoolean("ok"))
+    }
+
+    @Test
+    fun `run_shell - 非零退出码如实上报`() {
+        bootstrap()
+        val env = com.pocket.agent.tools.DeviceEnv(context, store, "")
+        val r = com.pocket.agent.tools.ToolRegistry.byName("run_shell")!!
+            .handler(JSONObject().put("command", "exit 3"), env)
+        assertEquals("非零退出码应原样返回：$r", 3, r.optInt("exit_code", -99))
+        assertFalse("非零退出不应报 ok", r.optBoolean("ok"))
+    }
+
+    // ---------- 会话搜索 / 压缩（1.5.1：前端一直在调，原生此前 404） ----------
+
+    @Test
+    fun `会话搜索 - 跨会话命中正文与工具输出并标注来源`() {
+        bootstrap()
+        val a = newSession()
+        val b = newSession()
+        store.addMessage(a, "user", "明天记得买牛奶")
+        store.addMessage(b, "assistant", "这里是无关内容")
+        store.addMessage(b, "tool", "{\"battery\":42}", JSONObject().put("tool_call_id", "c1"))
+
+        val resp = JSONObject(get("/api/sessions/search?q=" + java.net.URLEncoder.encode("牛奶", "UTF-8")).body)
+        assertEquals(1, resp.getInt("count"))
+        val hit = resp.getJSONArray("items").getJSONObject(0)
+        assertEquals(a, hit.getString("session_id"))
+        assertEquals("message", hit.getString("matched"))
+        assertTrue("摘要应含关键词：$hit", hit.getString("snippet").contains("牛奶"))
+
+        // 工具输出也要能搜到（1.3 起的契约）
+        val toolHit = JSONObject(get("/api/sessions/search?q=battery").body)
+        assertEquals(1, toolHit.getInt("count"))
+        assertEquals("tool_output", toolHit.getJSONArray("items").getJSONObject(0).getString("matched"))
+
+        // 空查询返回空集而不是全量
+        assertEquals(0, JSONObject(get("/api/sessions/search?q=").body).getInt("count"))
+    }
+
+    @Test
+    fun `会话压缩 - 归档早期消息并把摘要注入后续上下文`() {
+        bootstrap()
+        val sid = newSession()
+        // 12 条消息：压缩后保留最近 4 条
+        for (i in 1..12) {
+            store.addMessage(sid, if (i % 2 == 1) "user" else "assistant", "第 $i 条消息")
+        }
+        val resp = JSONObject(send("POST", "/api/sessions/$sid/compact",
+            JSONObject().put("keep", 4).toString()).body)
+        assertTrue("压缩应成功：$resp", resp.optBoolean("ok"))
+        assertEquals(8, resp.getInt("archived_messages"))
+        assertEquals(4, resp.getInt("kept"))
+        assertTrue("应产出摘要：$resp", resp.optString("summary").isNotEmpty())
+
+        // 水位推进：再压一次应报「已归档」
+        val again = JSONObject(send("POST", "/api/sessions/$sid/compact",
+            JSONObject().put("keep", 4).toString()).body)
+        assertEquals(false, again.optBoolean("ok"))
+
+        // 消息本身不能被删（压缩是归档不是截断）
+        assertEquals(12, JSONArray(get("/api/sessions/$sid/messages").body).length())
+
+        // 摘要要进后续对话的 system prompt，否则模型仍然失忆
+        fakeLlm.turns.addLast(FakeTurn(text = "好的"))
+        send("POST", "/api/chat", JSONObject().put("session_id", sid).put("message", "继续说").toString())
+        val sent = fakeLlm.lastMessages
+        assertTrue("system prompt 应含归档摘要，实际：${sent.take(300)}",
+            sent.any { it.optString("role") == "system" && it.optString("content").contains("早期对话摘要") ||
+                it.optString("content").contains("摘要") })
+    }
+
+    @Test
+    fun `会话压缩 - 消息不足时报无需压缩`() {
+        bootstrap()
+        val sid = newSession()
+        store.addMessage(sid, "user", "只有一条")
+        val r = JSONObject(send("POST", "/api/sessions/$sid/compact", "{}").body)
+        assertEquals(false, r.optBoolean("ok"))
+        assertTrue(r.optString("reason").contains("无需压缩"))
+        // 不存在的会话 → 404
+        assertEquals(404, send("POST", "/api/sessions/nope/compact", "{}").code)
+    }
+
+    // ---------- 契约表自检（防止文档再次与实现脱节） ----------
+
+    @Test
+    fun `接口契约 - 列在 implemented 的端点都不返回 503 not_implemented`() {
+        bootstrap()
+        // 逐个打真实路径：只要返回 `migration:not_implemented` 就说明契约表撒谎。
+        // 用 GET 探测只读端点；写端点用最小请求体，断言"不是 503 未实现"而非具体成功。
+        val probes = mapOf(
+            "/api/health" to "GET", "/api/native/status" to "GET",
+            "/api/tools" to "GET", "/api/settings" to "GET", "/api/providers" to "GET",
+            "/api/sessions" to "GET", "/api/approvals" to "GET",
+            "/api/approvals/pending" to "GET", "/api/jobs" to "GET",
+            "/api/recipes" to "GET", "/api/kb" to "GET", "/api/skills" to "GET",
+            "/api/stats" to "GET", "/api/metrics" to "GET", "/api/diagnostics" to "GET",
+            "/api/export" to "GET", "/api/memory/profile" to "GET",
+        )
+        for ((path, method) in probes) {
+            val r = send(method, path, null)
+            assertFalse("$path 出现在契约表里却返回 503 未实现：${r.body.take(120)}",
+                r.code == 503 && r.body.contains("not_implemented"))
+        }
+        // 搜索与压缩：前端一直在调，曾经是 404/503 的黑洞
+        assertEquals("搜索不应 404", 200, get("/api/sessions/search?q=x").code)
+        val sid = newSession()
+        assertEquals("压缩不应 404", 200,
+            send("POST", "/api/sessions/$sid/compact", "{}").code)
+        // 真正没实现的路径必须仍然 fail-closed，不能因为加了自检就放开
         assertEquals(503, get("/api/never-implemented").code)
     }
 }

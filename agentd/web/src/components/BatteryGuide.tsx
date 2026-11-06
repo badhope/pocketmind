@@ -5,13 +5,12 @@ import { isBatteryOptimizationIgnored, isNativeShell, requestIgnoreBatteryOptimi
  * 后台保活引导。
  *
  * 为什么需要：Android 的 Doze / App Standby 会在锁屏后限制后台网络与 CPU。
- * agentd 是 Termux 里的独立进程，本壳只是客户端；但系统一旦把它冻结，
+ * 无论后端是 APK 内的原生引擎还是 Termux 里的 agentd，系统一旦冻结进程，
  * SSE 会断、定时任务不触发、审批提醒收不到 —— 用户看到的表象是
  * "放一会儿就不提醒了"，而根因在系统省电策略。
  *
- * Termux / Andronix / UserLAnd 这类常驻应用的官方指引都是
- * 「设置 → 电池 → 不受限制」。这里只在「确实是壳内 + 尚未豁免」时提示一次，
- * 不打断聊天（做成设置面板里的一行，而不是弹窗）。
+ * 常驻类应用的官方指引都是「设置 → 电池 → 不受限制」。这里只在
+ * 「确实是壳内 + 尚未豁免」时提示一次，不打断聊天（做成设置面板里的一行）。
  */
 export function BatteryGuide() {
   const [needsGuide, setNeedsGuide] = useState(false);

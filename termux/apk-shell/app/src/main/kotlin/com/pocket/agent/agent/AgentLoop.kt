@@ -131,10 +131,20 @@ class AgentLoop(
         val planApproved = pendingPlans.remove(sessionId) == message
         val planMode = settings.agentMode() == "plan" && !planApproved
 
-        // 组装上下文：system + 最近历史
+        // 组装上下文：system + 历史归档 + 最近历史
         val history = store.getMessages(sessionId, 40)
         val messages = JSONArray()
-        messages.put(JSONObject().put("role", "system").put("content", systemPrompt(permissionMode)))
+        val system = StringBuilder(systemPrompt(permissionMode))
+        // 归档摘要必须注入，否则「压缩」只是把消息藏起来、模型照样失忆。
+        // 按旧→新拼接，最多 5 段（与 Python get_archives(limit=5) 一致）。
+        val archives = store.getArchives(sessionId, 5)
+        if (archives.length() > 0) {
+            system.append("\n\n以下是更早对话的摘要（按时间从旧到新）：")
+            for (i in 0 until archives.length()) {
+                system.append("\n- ").append(archives.optString(i))
+            }
+        }
+        messages.put(JSONObject().put("role", "system").put("content", system.toString()))
         for (i in 0 until history.length()) {
             val m = history.optJSONObject(i) ?: continue
             when (val role = m.optString("role")) {
@@ -334,13 +344,124 @@ class AgentLoop(
         } catch (e: Exception) {
             err("工具执行异常：${e.message}")
         }
+        // 撤销凭证从工具结果里剥离单独登记（与 Python `_ckpt` 约定一致）：
+        // 留在 result 里会被模型当成"备份路径"复述给用户，也不该进上下文。
+        val undoable = registerCheckpoint(sessionId, tid, name, result)
         val status = if (result.has("error") || result.has("error_code")) "failed" else "completed"
-        sse.send(JSONObject().put("type", "tool_update").put("id", tid).put("name", name)
-            .put("status", status).put("result", result).toString())
+        val update = JSONObject().put("type", "tool_update").put("id", tid).put("name", name)
+            .put("status", status).put("result", result)
+        if (undoable) update.put("undoable", true)
+        sse.send(update.toString())
         val text = result.toString()
         messages.put(JSONObject().put("role", "tool").put("tool_call_id", tid).put("content", text))
         store.addMessage(sessionId, "tool", text,
             JSONObject().put("tool_call_id", tid).put("name", name).put("status", status))
+    }
+
+    /** 从工具结果里取出 `_ckpt` 并落库；返回该调用是否可撤销。 */
+    private fun registerCheckpoint(sessionId: String, toolCallId: String, toolName: String, result: JSONObject): Boolean {
+        val ck = result.optJSONObject("_ckpt") ?: return false
+        result.remove("_ckpt")
+        return try {
+            store.recordCheckpoint(
+                sessionId, toolCallId, toolName,
+                ck.optString("path"), ck.optString("backup"), ck.optString("kind", "overwrite")
+            )
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * 压缩会话历史：把 keep 之前的消息归档成一段摘要，保留最近 keep 条。
+     *
+     * 放在 AgentLoop 而不是路由层，是因为摘要要走同一个 llmFactory ——
+     * 路由层自己 new LlmClient 会让单测无法注入假客户端（会真连网络）。
+     *
+     * 水位（archived_upto）只在摘要落库后推进：失败不丢历史，下次还能重试。
+     */
+    fun compact(sessionId: String, keep: Int): JSONObject {
+        val k = keep.coerceIn(2, 200)
+        val history = store.getMessages(sessionId, 1000)
+        if (history.length() <= k) {
+            return JSONObject().put("ok", false).put("reason", "消息只有 ${history.length()} 条，无需压缩")
+        }
+        val upto = store.archivedUpto(sessionId)
+        val pending = ArrayList<JSONObject>()
+        for (i in 0 until history.length() - k) {
+            val m = history.optJSONObject(i) ?: continue
+            if (m.optLong("id") > upto) pending.add(m)
+        }
+        if (pending.isEmpty()) {
+            return JSONObject().put("ok", false).put("reason", "这批历史已归档过，无需重复压缩")
+        }
+        val summary = summarize(pending) ?: run {
+            // 兜底：取最后一条用户消息。压缩的价值是不丢上下文，
+            // 因为模型不可用就让整个操作失败没有意义。
+            pending.asReversed().firstOrNull { it.optString("role") == "user" }
+                ?.let { "（早期对话摘要）" + it.optString("content").take(200) }
+        }
+        if (summary.isNullOrBlank()) {
+            return JSONObject().put("ok", false).put("reason", "没有可压缩的正文内容")
+        }
+        store.appendArchive(sessionId, summary)
+        store.setArchivedUpto(sessionId, pending.maxOf { it.optLong("id") })
+        return JSONObject().put("ok", true)
+            .put("archived_messages", pending.size)
+            .put("kept", k)
+            .put("summary", summary)
+    }
+
+    /** 用模型压缩；未配置或失败返回 null，由调用方降级。 */
+    private fun summarize(messages: List<JSONObject>): String? {
+        if (!settings.llmReady()) return null
+        return try {
+            val sb = StringBuilder()
+            for (m in messages) {
+                val role = m.optString("role")
+                if (role != "user" && role != "assistant") continue
+                val text = m.optString("content").trim()
+                if (text.isEmpty()) continue
+                sb.append(if (role == "user") "用户：" else "助手：").append(text.take(600)).append('\n')
+            }
+            if (sb.isEmpty()) return null
+            val req = JSONArray()
+                .put(JSONObject().put("role", "system").put("content",
+                    "把下面的对话压缩成一段不超过 400 字的中文摘要，保留结论、数字、待办与用户偏好；" +
+                        "不要复述过程，不要加评论，直接输出摘要正文。"))
+                .put(JSONObject().put("role", "user").put("content", sb.toString().take(12000)))
+            llmFactory(settings.llmConfig()).complete(req, maxTokens = 500).trim().ifEmpty { null }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 撤销一次文件操作：把备份拷回原路径。
+     *
+     * kind（overwrite / restore）都归结为「写回备份」，差别只在语义来源：
+     * 前者是被覆盖前备份，后者是被删除前备份。目录不清空——原生版本只备份单文件。
+     */
+    fun undo(sessionId: String, toolCallId: String): JSONObject {
+        val ck = store.findCheckpoint(sessionId, toolCallId)
+            ?: return JSONObject().put("error", "没有可撤销的操作（可能未备份或记录已删除）")
+        if (ck.optBoolean("undone")) return JSONObject().put("error", "该操作已撤销过")
+        val backup = java.io.File(ck.optString("backup"))
+        if (!backup.isFile) return JSONObject().put("error", "备份文件已丢失，无法撤销")
+        return try {
+            val target = java.io.File(ck.optString("path"))
+            target.parentFile?.mkdirs()
+            if (target.exists() && !target.delete()) {
+                return JSONObject().put("error", "目标文件被占用，无法还原")
+            }
+            backup.copyTo(target, overwrite = true)
+            store.markCheckpointUndone(ck.optLong("id"))
+            JSONObject().put("ok", true).put("restored", target.absolutePath)
+                .put("tool", ck.optString("tool"))
+        } catch (e: Exception) {
+            JSONObject().put("error", "撤销失败：${e.message}")
+        }
     }
 
     private fun needsAsk(risk: String, mode: String): Boolean =

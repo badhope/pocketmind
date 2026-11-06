@@ -38,10 +38,19 @@ class NativeEngineService : Service() {
         val settings = SettingsStore(this)
         val approval = ApprovalCenter(this)
         AgentLoop.appContext = { applicationContext }
-        val router = ApiRouter(this, store, settings, approval, AgentLoop(store, settings, approval)) {
+        val agent = AgentLoop(store, settings, approval)
+        val scheduler = NativeScheduler(this, store, agent)
+        val router = ApiRouter(this, store, settings, approval, agent, {
             engine?.takeIf { it.state == EngineState.RUNNING }
-        }
+        }, scheduler)
         this.router = router
+        // 服务起来就把闹钟全量重排一次：进程可能刚被系统杀掉重启，
+        // 而 AlarmManager 里的旧闹钟指向的 job 可能已被删除或停用。
+        try {
+            scheduler.rescheduleAll()
+        } catch (e: Exception) {
+            Log.w(TAG, "reschedule failed: ${e.message}")
+        }
         val engine = NativeEngine(0, router)
         this.engine = engine
         if (!engine.start()) {

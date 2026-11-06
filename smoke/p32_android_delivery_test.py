@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -31,6 +32,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+# Windows 的 CreateProcess 先搜系统目录，裸 "bash" 会命中
+# C:\Windows\system32\bash.exe（未装 WSL 时只是个打印提示的空壳），
+# 导致 start.sh 根本没被执行、参数日志为空。显式解析到 PATH 里真正的
+# bash 绝对路径即可绕开；Linux/Termux 上 shutil.which 同样返回可用解释器。
+BASH = shutil.which("bash") or "bash"
 
 passed, failed = [], []
 
@@ -228,7 +235,7 @@ def test_start_sh_args() -> None:
         ):
             if log_path.exists():
                 log_path.unlink()
-            r = subprocess.run(["bash", str(sh), *args], cwd=str(ROOT), env=env,
+            r = subprocess.run([BASH, str(sh), *args], cwd=str(ROOT), env=env,
                                capture_output=True, text=True, timeout=60)
             raw = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
             got = " ".join(raw.split())
@@ -282,7 +289,7 @@ def test_clear_token_sentinel() -> None:
             f'#!/bin/sh\nprintf "%s\n" "$@" > {log_name}\n'
             f'printf "AGENT_TOKEN=%s\n" "$AGENT_TOKEN" >> {log_name}\n',
             encoding="utf-8")
-        subprocess.run(["bash", str(sh)], cwd=str(ROOT), env=env2,
+        subprocess.run([BASH, str(sh)], cwd=str(ROOT), env=env2,
                        capture_output=True, text=True, timeout=60)
         out = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
         check("哨兵存在时 start.sh 不注入 AGENT_TOKEN", "AGENT_TOKEN=oldtoken" not in out, out[:200])
