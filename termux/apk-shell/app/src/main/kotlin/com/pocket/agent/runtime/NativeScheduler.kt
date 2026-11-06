@@ -148,7 +148,8 @@ class NativeScheduler(
             override fun write(b: ByteArray, off: Int, len: Int) {}
         })
         try {
-            agent.chat(sessionId, message, sink)
+            // headless=true：定时任务没有界面，需要审批的工具直接跳过而不是空等 120 秒。
+            agent.chat(sessionId, message, sink, headless = true)
         } catch (_: Exception) {
             // 调度线程不能因为一次任务失败而退出。
         }

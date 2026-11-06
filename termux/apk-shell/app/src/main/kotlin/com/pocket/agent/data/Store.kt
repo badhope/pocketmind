@@ -159,18 +159,40 @@ class Store(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERS
         return writableDatabase.update("sessions", cv, "id = ?", arrayOf(id)) > 0
     }
 
+    /**
+     * 删除会话及其全部从属数据。
+     *
+     * 只删 messages/todos 会留下三类残留：archives（滚动摘要）、checkpoints
+     * （撤销备份的磁盘文件）、jobs（还会继续触发并重建会话）。前两者是
+     * 「用户以为删了、磁盘上还在」，后两者是「删了又复活」——都必须一起清。
+     *
+     * 返回被删掉的备份文件路径，由调用方负责删盘（Store 不碰文件系统之外的路径）。
+     */
     fun deleteSession(id: String): Boolean {
         val db = writableDatabase
         db.beginTransaction()
         return try {
             db.delete("messages", "session_id = ?", arrayOf(id))
             db.delete("todos", "session_id = ?", arrayOf(id))
+            db.delete("archives", "session_id = ?", arrayOf(id))
+            db.delete("jobs", "session_id = ?", arrayOf(id))
+            // 检查点记录先取出备份路径，交给上层删文件（见 checkpointBackupsOf）
+            db.delete("checkpoints", "session_id = ?", arrayOf(id))
             val n = db.delete("sessions", "id = ?", arrayOf(id))
             db.setTransactionSuccessful()
             n > 0
         } finally {
             db.endTransaction()
         }
+    }
+
+    /** 删除前取出该会话所有备份文件的绝对路径，供上层删盘。 */
+    fun checkpointBackupsOf(sessionId: String): List<String> {
+        val out = ArrayList<String>()
+        readableDatabase.rawQuery(
+            "SELECT backup FROM checkpoints WHERE session_id = ?", arrayOf(sessionId)
+        ).use { c -> while (c.moveToNext()) out.add(c.getString(0)) }
+        return out
     }
 
     // ---------- 消息 ----------

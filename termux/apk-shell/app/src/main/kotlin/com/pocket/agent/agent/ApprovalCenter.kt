@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicReference
  *  - 全局 allow / deny 名单持久化到 rules.json；deny 优先于 allow；
  *  - 「始终拒绝」与「始终允许」命中的调用不弹卡（不产生幽灵审批）。
  */
-class ApprovalCenter(context: Context) {
+class ApprovalCenter(private val context: Context) {
 
     class Pending(
         val sessionId: String,
@@ -83,6 +83,23 @@ class ApprovalCenter(context: Context) {
     fun isAutoAllowed(name: String, sessionId: String): Boolean =
         name in globalAllow || sessionAllow[sessionId]?.contains(name) == true
 
+    /**
+     * 删会话时清掉它的「本会话始终允许」名单与未决审批。
+     *
+     * 不清的后果：同一 session id 被导入复用（备份恢复）时，旧的白名单会
+     * 无声生效——用户以为自己删干净了，实际危险工具的放行还在。
+     */
+    @Synchronized
+    fun forgetSession(sessionId: String) {
+        sessionAllow.remove(sessionId)
+        val stale = pending.values.filter { it.sessionId == sessionId }.map { it.toolCallId }
+        stale.forEach {
+            pending.remove(it)
+            decisions.remove(it)
+        }
+        persist()
+    }
+
     fun isAutoDenied(name: String): Boolean = name in globalDeny
 
     /** 注册一个未决审批并等待决策；超时返回 "timeout"。 */
@@ -102,14 +119,68 @@ class ApprovalCenter(context: Context) {
         val answer = AtomicReference<String>("")
         decisions[toolCallId] = latch to answer
         try {
-            if (!latch.await(timeout.toLong(), TimeUnit.SECONDS)) return "timeout"
+            if (!latch.await(timeout.toLong(), TimeUnit.SECONDS)) {
+                audit(sessionId, toolCallId, name, risk, "timeout", timeout)
+                return "timeout"
+            }
         } catch (_: InterruptedException) {
+            audit(sessionId, toolCallId, name, risk, "timeout", timeout)
             return "timeout"
         } finally {
             pending.remove(toolCallId)
             decisions.remove(toolCallId)
         }
         return answer.get()
+    }
+
+    /**
+     * 审批审计日志（append-only JSON Lines）。
+     *
+     * 为什么必须落盘：本项目把「审批是安全边界」当卖点，但此前每次审批
+     * 「谁在什么时候批准了什么」只在内存里，进程重启即丢。事后要回答
+     * 「昨晚那条删文件的命令是谁放行的」时，没有任何证据。
+     *
+     * 只记元数据，不记命令内容与工具参数（那些可能含手机号、文件内容）。
+     * 轮转：超过 1MB 时改名为 .1，只保留一代——本机存储，不无限增长。
+     */
+    private fun audit(
+        sessionId: String, toolCallId: String, tool: String, risk: String,
+        decision: String, timeoutSec: Int = 0,
+    ) {
+        try {
+            val f = File(context.filesDir, "audit/approvals.jsonl")
+            f.parentFile?.mkdirs()
+            if (f.exists() && f.length() > 1_048_576) {
+                val old = File(f.parentFile, "approvals.jsonl.1")
+                if (old.exists()) old.delete()
+                f.renameTo(old)
+            }
+            val rec = JSONObject()
+                .put("ts", System.currentTimeMillis() / 1000.0)
+                .put("session", sessionId.take(32))
+                .put("call", toolCallId.take(64))
+                .put("tool", tool)
+                .put("risk", risk)
+                .put("decision", decision)
+                .put("timeout_s", timeoutSec)
+            f.appendText(rec.toString() + "\n")
+        } catch (_: Exception) {
+            // 审计写失败绝不阻断审批本身：可用性优先，但不能静默——
+            // /api/diagnostics 会读同一目录，写失败时该目录不可读。
+        }
+    }
+
+    /** 最近的审批记录（诊断/导出用，新→旧，最多 limit 条）。 */
+    fun recentAudit(limit: Int = 50): List<JSONObject> {
+        val f = File(context.filesDir, "audit/approvals.jsonl")
+        if (!f.exists()) return emptyList()
+        return try {
+            f.readLines().takeLast(limit).mapNotNull {
+                runCatching { JSONObject(it) }.getOrNull()
+            }.asReversed()
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     /** 前端 / 定时器提交决策；返回 false 表示审批不存在或已过期。 */
@@ -139,6 +210,7 @@ class ApprovalCenter(context: Context) {
             }
             else -> return false
         }
+        audit(sessionId, toolCallId, p.name, p.risk, decision)
         latch.countDown()
         return true
     }

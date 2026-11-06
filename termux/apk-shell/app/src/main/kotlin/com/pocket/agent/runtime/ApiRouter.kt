@@ -138,6 +138,14 @@ class ApiRouter(
             path == "/api/tools" && ex.method == "GET" ->
                 ex.respond(200, JSON, JSONObject().put("tools", ToolRegistry.listJson()).toString())
             path == "/api/diagnostics" && ex.method == "GET" -> diagnostics(ex)
+            // 审批审计：谁、何时、放行了什么。只读，不提供删除接口（append-only）。
+            path == "/api/approvals/audit" && ex.method == "GET" -> {
+                val limit = (ex.query["limit"]?.toIntOrNull() ?: 50).coerceIn(1, 500)
+                val arr = JSONArray()
+                approval.recentAudit(limit).forEach { arr.put(it) }
+                ex.respond(200, JSON, JSONObject().put("count", arr.length())
+                    .put("items", arr).toString())
+            }
             path == "/api/kb" && ex.method == "GET" ->
                 ex.respond(200, JSON, JSONObject().put("items", store.kbList()).toString())
             path.startsWith("/api/kb/") && ex.method == "DELETE" -> {
@@ -192,8 +200,17 @@ class ApiRouter(
                 else ex.respond(404, JSON, "{\"error\":\"会话不存在\"}")
             }
             parts.size == 1 && ex.method == "DELETE" -> {
-                if (store.deleteSession(sid)) ex.respond(200, JSON, "{\"ok\":true}")
-                else ex.respond(404, JSON, "{\"error\":\"会话不存在\"}")
+                // 先停掉在途轮次，否则删完还会写回消息（与 Python cancel_run 同序）
+                agent.cancelRun(sid)
+                // 备份文件在磁盘上，必须删库之前取路径
+                val backups = store.checkpointBackupsOf(sid)
+                approval.forgetSession(sid)
+                if (store.deleteSession(sid)) {
+                    backups.forEach { runCatching { java.io.File(it).delete() } }
+                    ex.respond(200, JSON, "{\"ok\":true}")
+                } else {
+                    ex.respond(404, JSON, "{\"error\":\"会话不存在\"}")
+                }
             }
             parts.getOrNull(1) == "messages" && ex.method == "GET" -> {
                 if (store.getSession(sid) == null) return ex.respond(404, JSON, "{\"error\":\"会话不存在\"}")
@@ -361,7 +378,11 @@ class ApiRouter(
                     .put("shell", if (shell) "restricted" else "unavailable")
                     .put("scheduler", "ok")
                     .put("scheduler_exact", if (scheduler.canScheduleExact()) "ok" else "inexact")
-                    .put("undo", "ok"))
+                    .put("undo", "ok")
+                    // 如实报告凭据落盘是加密还是明文，不粉饰
+                    .put("secret_storage",
+                        if (com.pocket.agent.data.SecretsVault.isAvailable()) "keystore-encrypted"
+                        else "plaintext-fallback"))
                 .put("note", "shell 以 app 身份运行 /system/bin/sh（无 root、无 pkg/apt）；" +
                     "定时任务用 AlarmManager，未授予精确闹钟权限时可能延迟数分钟")
                 .toString()

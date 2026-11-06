@@ -1,0 +1,27 @@
+# 锁定的依赖树（由 `uv pip freeze` 生成，勿手改）
+#
+# 用法：
+#   pip install -r agentd/requirements-lock.txt      # 运行时（可复现）
+#   pip install -r agentd/requirements-dev-lock.txt  # 开发 / 门禁
+#
+# 为什么需要：requirements.txt 只有下限与大版本上限（为了在 Termux 上能装、能编），
+# 但「今天装」和「三个月后装」会解析出不同版本——上游一个 patch 就能让门禁行为漂移。
+# 锁文件固定整个传递依赖树，把「我这跑得通」变成可复现的事实。
+#
+# 更新方式（有意升级依赖时）：
+#   uv pip install -r agentd/requirements.txt -r agentd/requirements-dev.txt
+#   uv pip freeze > .tmp/frozen.txt   然后按下方分组重排两份锁文件
+#
+# 注意：本文件**不用于 Termux 安装**——aarch64 上需要源码编译的包版本不同，
+# Termux 仍用 requirements.txt 让 pip 挑可用 wheel。
+
+# ---- 开发 / 门禁 ----
+iniconfig==2.3.1
+mypy==1.20.2
+mypy-extensions==1.1.0
+packaging==26.3
+pathspec==1.1.1
+pluggy==1.7.0
+pytest==8.4.2
+pytest-asyncio==1.4.1.post1
+ruff==0.17.3

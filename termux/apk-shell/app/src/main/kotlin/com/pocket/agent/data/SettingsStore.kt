@@ -19,11 +19,17 @@ class SettingsStore(context: Context) {
 
     @Synchronized private fun load(): JSONObject {
         if (!file.exists()) return JSONObject(DEFAULTS)
-        return try {
+        val parsed = try {
             JSONObject(file.readText())
         } catch (_: Exception) {
-            JSONObject(DEFAULTS)
+            return JSONObject(DEFAULTS)
         }
+        // 内存里始终存明文，只在落盘时加密；这样调用方（LlmClient 等）不用关心。
+        parsed.optJSONObject("llm")?.let { llm ->
+            val stored = llm.optString("api_key")
+            if (stored.isNotEmpty()) llm.put("api_key", SecretsVault.open(stored))
+        }
+        return parsed
     }
 
     @Synchronized fun snapshot(): JSONObject {
@@ -74,6 +80,28 @@ class SettingsStore(context: Context) {
         return if (m in setOf("plan", "act")) m else "act"
     }
 
+    /**
+     * 上下文预算（与 Python config.py 的 context 段同名字段）。
+     *
+     * 为什么原生必须也读它：工具结果原样进上下文时，一次 `run_shell` 的 30KB
+     * 输出 ≈ 7500 token，会在之后几十轮里每轮重发一次。这不是"体验问题"，
+     * 是按量计费的真金白银。budget_tokens=0 表示未配置，走固定硬截断。
+     */
+    @Synchronized fun contextCfg(): ContextCfg {
+        val c = data.optJSONObject("context") ?: JSONObject()
+        return ContextCfg(
+            budgetTokens = c.optInt("budget_tokens", 0).coerceAtLeast(0),
+            autoCompress = c.optBoolean("auto_compress", false),
+            compressThreshold = c.optDouble("compress_threshold", 0.8).coerceIn(0.1, 0.95),
+        )
+    }
+
+    class ContextCfg(
+        val budgetTokens: Int,
+        val autoCompress: Boolean,
+        val compressThreshold: Double,
+    )
+
     /** 合并保存；返回保存后的打码快照。api_key 占位符不覆盖已存值。 */
     @Synchronized fun save(patch: JSONObject): JSONObject {
         mergeInto(data, patch)
@@ -91,9 +119,26 @@ class SettingsStore(context: Context) {
         return snapshot()
     }
 
+    /**
+     * 落盘：API Key 经 Android Keystore 加密后再写。
+     *
+     * 只在写盘这一刻加密，内存里保持明文——LlmClient / llmReady / 打码快照
+     * 全都按明文工作，加密是纯粹的存储层关注点。
+     */
     private fun persist() {
         file.parentFile?.mkdirs()
-        file.writeText(data.toString(2))
+        val onDisk = JSONObject(data.toString())
+        onDisk.optJSONObject("llm")?.let { llm ->
+            val plain = llm.optString("api_key")
+            if (plain.isNotEmpty()) llm.put("api_key", SecretsVault.seal(plain))
+        }
+        // 先写临时文件再 rename：写一半断电不会留下半个 JSON 导致配置全丢。
+        val tmp = File(file.parentFile, file.name + ".tmp")
+        tmp.writeText(onDisk.toString(2))
+        if (!tmp.renameTo(file)) {
+            file.writeText(onDisk.toString(2))
+            tmp.delete()
+        }
     }
 
     private fun maskLlm(llm: JSONObject): JSONObject {
@@ -140,7 +185,8 @@ class SettingsStore(context: Context) {
                       "temperature": 0.7, "max_tokens": 2048},
               "permission_mode": "approve",
               "agent_mode": "act",
-              "server": {"approval_timeout": 120}
+              "server": {"approval_timeout": 120},
+              "context": {"budget_tokens": 0, "auto_compress": false, "compress_threshold": 0.8}
             }
         """.trimIndent()
 

@@ -1,0 +1,58 @@
+name: 功能建议
+description: 提出一个新能力或改进（先看 ROADMAP，标为 not planned 的需强论证）
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请先看 [ROADMAP.md](../blob/main/ROADMAP.md)。
+        「Not planned — platform limits」里的项是 Android 平台限制，不是待办。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你遇到的实际问题
+      description: |
+        写"我在什么场景下做不成什么事"，不要写"加一个 XX 功能"。
+        从问题出发才能判断该不该做、该怎么做。
+      placeholder: "我在锁屏时收不到定时任务的提醒，醒来才发现漏了三次。"
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: 现在怎么绕过的
+      description: 如果你已经找到临时办法，写出来——它能帮我们判断痛点的真实强度。
+    validations:
+      required: false
+
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: 涉及哪个运行时
+      options:
+        - 独立 APK
+        - Termux / Python
+        - 两者都要
+        - 不确定
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你设想的做法（可选）
+      description: 有想法就写，但不必写成技术方案——问题本身更重要。
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已查看 ROADMAP，且不是其中的 not planned 项
+          required: true
+        - label: 这是一个真实场景的问题，不是"别家有所以我也要"
+          required: true

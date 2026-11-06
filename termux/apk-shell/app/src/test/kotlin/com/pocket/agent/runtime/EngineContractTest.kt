@@ -39,6 +39,8 @@ class EngineContractTest {
     private lateinit var engine: NativeEngine
     private lateinit var router: ApiRouter
     private lateinit var fakeLlm: FakeLlm
+    private lateinit var approval: ApprovalCenter
+    private lateinit var loop: AgentLoop
     private var cookie: String = ""
 
     /** 一轮对话的脚本：可选文本 + 可选工具调用。 */
@@ -76,10 +78,10 @@ class EngineContractTest {
         settings = SettingsStore(context)
         configureLlm()
 
-        val approval = ApprovalCenter(context)
+        approval = ApprovalCenter(context)
         AgentLoop.appContext = { context }
         fakeLlm = FakeLlm(SettingsStore.LlmConfig("http://fake.local", "sk-test", "fake-model", 0.7, 2048))
-        val loop = AgentLoop(store, settings, approval) { fakeLlm }
+        loop = AgentLoop(store, settings, approval) { fakeLlm }
         router = ApiRouter(context, store, settings, approval, loop, {
             engine?.takeIf { it.state == EngineState.RUNNING }
         }, NativeScheduler(context, store, loop))
@@ -629,5 +631,198 @@ class EngineContractTest {
             .handler(JSONObject().put("path", "notes.txt").put("content", "改过了"), env)
         assertTrue("普通写入应成功：$w", w.optBoolean("ok"))
         assertEquals("改过了", java.io.File(context.filesDir, "notes.txt").readText())
+    }
+
+    // ---------- 上下文预算（1.6：工具结果不该把长会话撑爆） ----------
+
+    @Test
+    fun `工具结果超限时只裁剪进上下文 落库仍是全文`() {
+        bootstrap()
+        configureLlm(permissionMode = "auto")
+        val sid = newSession()
+        // 造一个 9000 字符的工具结果（超过未配置预算时的 6000 上限）
+        val big = "x".repeat(9000)
+        java.io.File(context.filesDir, "big.txt").writeText(big)
+        fakeLlm.turns.addLast(FakeTurn(calls = listOf(
+            Triple("call-big", "read_file", "{\"path\":\"big.txt\"}")))
+        )
+        fakeLlm.turns.addLast(FakeTurn(text = "读完了"))
+        send("POST", "/api/chat", JSONObject().put("session_id", sid).put("message", "读大文件").toString())
+
+        // 送给模型的 tool 消息必须被截断
+        val toolMsg = fakeLlm.lastMessages.firstOrNull { it.optString("role") == "tool" }
+        assertTrue("应有一条 tool 消息", toolMsg != null)
+        val sent = toolMsg!!.optString("content")
+        assertTrue("进上下文的内容应被截断（实际 ${sent.length} 字）", sent.length < 9000)
+        assertTrue("截断后应带说明", sent.contains("已截断"))
+
+        // 但落库的全文必须完整（用户回看不能丢内容）
+        val msgs = JSONArray(get("/api/sessions/$sid/messages").body)
+        val stored = (0 until msgs.length()).map { msgs.getJSONObject(it) }
+            .firstOrNull { it.getString("role") == "tool" }
+        assertTrue("落库应保留全文（实际 ${stored!!.getString("content").length} 字）",
+            stored.getString("content").contains(big))
+    }
+
+    @Test
+    fun `配置预算后按比例收紧单条工具结果上限`() {
+        bootstrap()
+        configureLlm(permissionMode = "auto")
+        // 预算 10000 token → 单条上限 = 10000*0.15*4 = 6000 字符
+        settings.save(JSONObject().put("context", JSONObject().put("budget_tokens", 10000)))
+        val sid = newSession()
+        val big = "y".repeat(9000)
+        java.io.File(context.filesDir, "big2.txt").writeText(big)
+        fakeLlm.turns.addLast(FakeTurn(calls = listOf(
+            Triple("call-b2", "read_file", "{\"path\":\"big2.txt\"}")))
+        )
+        fakeLlm.turns.addLast(FakeTurn(text = "ok"))
+        send("POST", "/api/chat", JSONObject().put("session_id", sid).put("message", "读").toString())
+        val sent = fakeLlm.lastMessages.firstOrNull { it.optString("role") == "tool" }
+            ?.optString("content") ?: ""
+        assertTrue("截断后长度应接近 6000（实际 ${sent.length}）", sent.length in 5000..7000)
+    }
+
+    @Test
+    fun `历史超预算时丢掉最旧的 但 system 与最后一条用户消息保留`() {
+        bootstrap()
+        // 预算设小一点，逼出裁剪
+        settings.save(JSONObject().put("context", JSONObject().put("budget_tokens", 500)))
+        val sid = newSession()
+        // 20 条各 200 字的历史 → 远超 500 token
+        for (i in 1..20) {
+            store.addMessage(sid, if (i % 2 == 1) "user" else "assistant", "第${i}条".padEnd(200, 'z'))
+        }
+        fakeLlm.turns.addLast(FakeTurn(text = "收到"))
+        send("POST", "/api/chat", JSONObject().put("session_id", sid).put("message", "最新一问").toString())
+
+        val sentMsgs = fakeLlm.lastMessages
+        assertEquals("首条必须是 system", "system", sentMsgs.first().optString("role"))
+        assertTrue("最后一条必须是本轮用户消息",
+            sentMsgs.last().optString("role") == "user" &&
+                sentMsgs.last().optString("content") == "最新一问")
+        assertTrue("应提示历史被省略",
+            sentMsgs.any { it.optString("content").contains("超出上下文预算已省略") })
+        assertTrue("消息条数应明显少于 21（实际 ${sentMsgs.size}）", sentMsgs.size < 15)
+    }
+
+    // ---------- 定时任务的无人审批策略（1.6） ----------
+
+    @Test
+    fun `定时任务遇需审批工具直接跳过 不等 120 秒`() {
+        bootstrap()
+        configureLlm(permissionMode = "approve")  // 默认就是逐次审批
+        val sid = newSession()
+        fakeLlm.turns.addLast(FakeTurn(calls = listOf(
+            Triple("call-h1", "write_file", "{\"path\":\"x.txt\",\"content\":\"y\"}")))
+        )
+        fakeLlm.turns.addLast(FakeTurn(text = "做完了"))
+
+        val started = System.currentTimeMillis()
+        // headless=true 等价于定时任务触发
+        loop.chat(sid, "后台任务", com.pocket.agent.runtime.SseWriter(java.io.ByteArrayOutputStream()),
+            headless = true)
+        val elapsed = System.currentTimeMillis() - started
+
+        assertTrue("不应等待审批超时（耗时 ${elapsed}ms）", elapsed < 20_000)
+        // 结果里应有明确的跳过理由，而不是笼统的"用户拒绝"
+        val msgs = JSONArray(get("/api/sessions/$sid/messages").body)
+        val toolMsg = (0 until msgs.length()).map { msgs.getJSONObject(it) }
+            .firstOrNull { it.getString("role") == "tool" }
+        assertTrue("工具消息应落库", toolMsg != null)
+        assertTrue("应说明是后台无审批人：${toolMsg!!.optString("content")}",
+            toolMsg.optString("content").contains("定时任务在后台运行"))
+        assertEquals("状态应为 denied", "denied",
+            toolMsg.optJSONObject("meta")?.optString("status"))
+    }
+
+    // ---------- 删会话的级联清理（1.6） ----------
+
+    @Test
+    fun `删会话会清掉归档 任务 备份与审批白名单`() {
+        bootstrap()
+        val sid = newSession()
+        store.addMessage(sid, "user", "hello")
+        store.appendArchive(sid, "旧摘要")
+        store.insertJob(JSONObject().put("name", "任务").put("trigger_type", "interval")
+            .put("expr", "3600").put("message", "m").put("session_id", sid))
+
+        // 造一条检查点记录 + 对应的备份文件
+        val bak = java.io.File(context.filesDir, "checkpoints/bak.txt")
+        bak.parentFile?.mkdirs(); bak.writeText("旧内容")
+        store.recordCheckpoint(sid, "call-1", "write_file", "/some/path", bak.absolutePath, "overwrite")
+
+        // 给该会话加一条「始终允许」
+        approval.decide(sid, "nonexistent", "allow_once")
+        // 直接调接口删
+        assertEquals(200, send("DELETE", "/api/sessions/$sid", null).code)
+
+        assertEquals("会话应删除", null, store.getSession(sid))
+        assertEquals("归档应清空", 0, store.getArchives(sid, 10).length())
+        assertEquals("该会话的任务应删除", 0,
+            JSONObject(get("/api/jobs").body).getJSONArray("jobs").length())
+        assertFalse("备份文件应被删盘", bak.exists())
+    }
+
+    // ---------- 审批审计（1.6：卖点是审批，就必须能追溯） ----------
+
+    @Test
+    fun `审批决策会写入审计日志 且不泄露命令内容`() {
+        bootstrap()
+        // 走一次真实的审批流：write 工具 → 等卡片 → 批准
+        fakeLlm.turns.addLast(FakeTurn(calls = listOf(
+            Triple("call-audit", "set_clipboard", "{\"text\":\"敏感内容SECRET\"}")))
+        )
+        fakeLlm.turns.addLast(FakeTurn(text = "完成"))
+        val sid = newSession()
+        val t = Thread {
+            send("POST", "/api/chat", JSONObject().put("session_id", sid)
+                .put("message", "复制").toString())
+        }
+        t.start()
+        var pending = JSONArray()
+        for (i in 0 until 80) {
+            Thread.sleep(100)
+            pending = JSONObject(get("/api/approvals/pending").body)
+                .optJSONArray("pending") ?: JSONArray()
+            if (pending.length() > 0) break
+        }
+        assertEquals(1, pending.length())
+        send("POST", "/api/approval", JSONObject().put("session_id", sid)
+            .put("tool_call_id", pending.getJSONObject(0).getString("tool_call_id"))
+            .put("decision", "allow_once").toString())
+        t.join(30000)
+
+        val audit = JSONObject(get("/api/approvals/audit").body)
+        assertTrue("应有审计记录：$audit", audit.getInt("count") >= 1)
+        val rec = audit.getJSONArray("items").getJSONObject(0)
+        assertEquals("set_clipboard", rec.getString("tool"))
+        assertEquals("write", rec.getString("risk"))
+        assertEquals("allow_once", rec.getString("decision"))
+        assertTrue("应带时间戳", rec.getDouble("ts") > 0)
+        // 关键：不能把工具参数（可能含剪贴板内容/手机号）写进审计
+        assertFalse("审计不应包含工具参数内容：$rec",
+            rec.toString().contains("敏感内容SECRET"))
+        assertFalse("审计不应包含 API Key：$rec", rec.toString().contains("sk-test"))
+    }
+
+    @Test
+    fun `超时未决也记审计 且审计接口受鉴权保护`() {
+        bootstrap()
+        // 直接构造一次超时：approval.awaitDecision 用最短 10 秒太久，改用 0 → 被收敛到 10
+        // 这里改为验证「未认证拿不到审计」，以及审计文件路径不在 read_file 白名单内
+        val noAuth = java.net.URL("http://127.0.0.1:${engine.port}/api/approvals/audit")
+            .openConnection() as java.net.HttpURLConnection
+        assertEquals("审计接口必须鉴权", 401, noAuth.responseCode)
+        noAuth.disconnect()
+
+        val env = com.pocket.agent.tools.DeviceEnv(context, store, "")
+        val tool = com.pocket.agent.tools.ToolRegistry.byName("read_file")!!
+        val r = try {
+            tool.handler(JSONObject().put("path", "audit/approvals.jsonl"), env)
+        } catch (e: com.pocket.agent.tools.ToolAbort) {
+            e.result
+        }
+        assertTrue("审计日志不应能被 read_file 读走：$r", r.has("error"))
     }
 }

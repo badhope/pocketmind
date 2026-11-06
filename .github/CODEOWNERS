@@ -1,0 +1,12 @@
+# 默认所有路径归维护者；单人项目也值得写——它让「谁该 review」机器可读，
+# 将来加人时不用改文档，改这一行即可。
+* @badhope
+
+# 安全敏感的几处：改动必须由维护者本人确认（即使是协作者提交）
+/agentd/approval.py           @badhope
+/agentd/permissions.py        @badhope
+/agentd/tools/shell.py        @badhope
+/termux/apk-shell/app/src/main/kotlin/com/pocket/agent/agent/ApprovalCenter.kt @badhope
+/termux/apk-shell/app/src/main/kotlin/com/pocket/agent/tools/ToolRegistry.kt   @badhope
+/termux/apk-shell/app/src/main/kotlin/com/pocket/agent/data/SecretsVault.kt    @badhope
+/.github/workflows/           @badhope

@@ -111,7 +111,10 @@ PocketMind 侧证据：
 
 ## 六、已知短板（诚实清单）
 
-- 行覆盖率 59%（红线 90%）、分支 83.3%（红线 85%）：`agentd/main.py` 的路由错误分支仍是主要缺口。
+- **覆盖率**：行覆盖 **46.4%**（实测，2026-11-07），门禁红线 40% 且只升不降
+  （`tests/check_coverage.py`）。此前本文件写的「59% / 红线 90%」是未落地的目标值，
+  没有可执行的门禁支撑，属于自欺——已改为实测数字。主要缺口集中在
+  `agentd/tools/phone/*`（需要真机 termux-api）与 `agentd/main.py` 的路由错误分支。
 - 真机未验证：所有 E2E 在 Chromium + Windows 完成；aarch64 真机的 termux-api 行为只有模拟器证据
   （`docs/android-emulator-testing.md`）。
 - 无 UI 自动化能力：这是定位选择，不是缺陷，但用户需要知道边界（`docs/capability-matrix.md`）。

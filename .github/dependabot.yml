@@ -33,3 +33,27 @@ updates:
       pip-minor:
         patterns: ["*"]
         update-types: ["patch", "minor"]
+
+  # Gradle：Android 依赖（含 Robolectric / JUnit / AGP 自身）。
+  # 单独一组是因为 Gradle 生态的大版本升级经常要求同步抬 compileSdk 与 AGP，
+  # 与其他生态的节奏不同，混在一起会互相阻塞。
+  - package-ecosystem: gradle
+    directory: /termux/apk-shell
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      gradle-patch:
+        patterns: ["*"]
+        update-types: ["patch"]
+    ignore:
+      # AGP 大版本与 Gradle 版本强耦合，必须人工验证整条构建链
+      - dependency-name: "com.android.tools.build:gradle"
+        update-types: ["version-update:semver-major"]
+
+  # Docker：基础镜像与依赖
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2

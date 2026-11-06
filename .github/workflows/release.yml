@@ -1,0 +1,115 @@
+name: Release
+
+# 发布流水线：打 tag 后自动产出可安装的 APK 并建 Release。
+#
+# 为什么必须自动化：此前仓库只有 CI（构建校验），发布全是手工——
+# 「tag 打了但 APK 没上传」「APK 在本机有、别人装不到」都发生过。
+# 现在 tag 是唯一发布入口：推送 v* 即触发构建 + 校验 + 上传。
+#
+# 签名：`ANDROID_KEYSTORE_BASE64` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` /
+# `KEY_PASSWORD` 四个 secret 缺一不可。没有 secret 时产出 unsigned 并
+# **明确标注**，不会把未签名包当成品（那会让用户装出「解析包错误」）。
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "只构建不发布"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-release-apk:
+    name: Build signed APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install platform + build-tools
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Decode keystore (skip when secret absent)
+        id: keystore
+        run: |
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
+            cat > termux/apk-shell/keystore.properties <<EOF
+          storeFile=$RUNNER_TEMP/release.jks
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          EOF
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::未配置签名 secret，本次产出 unsigned APK（不可直接安装分发）"
+          fi
+
+      - name: Unit tests + lint
+        working-directory: termux/apk-shell
+        run: |
+          bash ./gradlew testDebugUnitTest lintDebug --no-daemon --stacktrace
+
+      - name: Build APK
+        run: |
+          if [ "${{ steps.keystore.outputs.signed }}" = "true" ]; then
+            bash scripts/build-apk.sh --release
+          else
+            bash scripts/build-apk.sh
+          fi
+
+      - name: Verify version matches tag
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          NAME=$(aapt dump badging termux/apk-shell/app/build/outputs/apk/*/*.apk | head -1 | grep -oP "versionName='\K[^']+")
+          echo "tag=$TAG apk=$NAME"
+          if [ "$TAG" != "$NAME" ]; then
+            echo "::error::APK versionName ($NAME) 与 tag ($TAG) 不一致"
+            exit 1
+          fi
+
+      - name: Verify signature
+        if: steps.keystore.outputs.signed == 'true'
+        run: |
+          APK=$(ls termux/apk-shell/app/build/outputs/apk/release/*.apk | head -1)
+          apksigner verify --verbose "$APK"
+          zipalign -c -v 4 "$APK" >/dev/null && echo "zipalign OK"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocketmind-apk-${{ github.ref_name }}
+          path: termux/apk-shell/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
+        uses: softprops/action-gh-release@v2
+        with:
+          files: termux/apk-shell/app/build/outputs/apk/**/*.apk
+          generate_release_notes: true
+          body: |
+            ## 安装
+
+            下载 `.apk` 直接安装（需允许「安装未知来源应用」）。
+
+            - **签名状态**：${{ steps.keystore.outputs.signed == 'true' && '已签名' || '未签名（需自行签名后才能安装）' }}
+            - **最低系统**：Android 8.0（API 26）
+            - **数据**：全部留在本机；卸载会一并删除
+
+            完整变更见 [CHANGELOG.md](CHANGELOG.md)。

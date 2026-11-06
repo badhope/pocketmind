@@ -147,6 +147,10 @@ if [ "$RUN_BACKEND" = 1 ]; then
   fi
   echo "  Python $("$PY" -c 'import platform;print(platform.python_version())') / ruff ok"
 
+  step "依赖锁一致性（锁文件覆盖 requirements 的每个直接依赖）"     "$PY" tests/check_locks.py
+  # 覆盖率是「测试真的覆盖了代码」的唯一量化证据；同类项目普遍没有，
+  # 本仓库既已声明 90% 红线（docs/COMPETITORS.md），就必须有可执行的门。
+  step "覆盖率（行覆盖红线 40%，只升不降）" "$PY" tests/check_coverage.py
   step "compileall：全部模块可编译" "$PY" -m compileall -q agentd/ tests/ smoke/
   step "ruff：静态检查" "$PY" -m ruff check agentd/ tests/ smoke/
   step "mypy：类型检查" "$PY" -m mypy agentd/

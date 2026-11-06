@@ -71,8 +71,12 @@ class AgentLoop(
     /**
      * 处理一条用户消息（阻塞，占用连接线程直到 done/error）。
      * emit 直接写 SSE；审批等待期间流保持打开（帧不发，连接不断）。
+     *
+     * [headless]：无人在看界面（定时任务触发）。此时需要审批的工具**直接拒绝**，
+     * 不再等 120 秒——后台没有任何人能点批准，等满只会让任务白转两分钟，
+     * 用户还以为任务卡住了。拒绝理由写清楚，任务结果里能看到。
      */
-    fun chat(sessionId: String, message: String, sse: SseWriter) {
+    fun chat(sessionId: String, message: String, sse: SseWriter, headless: Boolean = false) {
         sse.send(JSONObject().put("type", "session").put("session_id", sessionId).toString())
         val run = Run()
         val existing = runs.putIfAbsent(sessionId, run)
@@ -86,7 +90,7 @@ class AgentLoop(
         try {
             var current = message
             do {
-                runOne(sessionId, current, run, sse)
+                runOne(sessionId, current, run, sse, headless)
                 current = ""
                 synchronized(run.pending) {
                     if (run.pending.isNotEmpty()) {
@@ -101,7 +105,7 @@ class AgentLoop(
         }
     }
 
-    private fun runOne(sessionId: String, message: String, run: Run, sse: SseWriter) {
+    private fun runOne(sessionId: String, message: String, run: Run, sse: SseWriter, headless: Boolean = false) {
         val llmReady = settings.llmReady()
         if (!llmReady) {
             val missing = settings.llmMissing().joinToString("、")
@@ -179,6 +183,10 @@ class AgentLoop(
                 else -> {}
             }
         }
+        // 按 token 预算裁剪历史：固定 40 条在长会话里照样能撑爆窗口
+        // （40 条 × 单条几千字）。这里从最旧开始丢，system 与最后一条用户
+        // 消息永远保留——丢到最后一问一答仍然可回答。
+        trimToBudget(messages)
 
         val tools = if (permissionMode == "chat") null else ToolRegistry.schemaJson()
         var depth = 0
@@ -266,7 +274,7 @@ class AgentLoop(
                 val env = DeviceEnv(appContext(), store, sessionId)
                 for ((tid, name, argsStr) in calls) {
                     if (run.cancelled) break
-                    runOneTool(sessionId, run, env, sse, messages, tid, name, argsStr, permissionMode)
+                    runOneTool(sessionId, run, env, sse, messages, tid, name, argsStr, permissionMode, headless)
                 }
             }
             if (depth >= MAX_DEPTH) {
@@ -293,16 +301,20 @@ class AgentLoop(
         name: String,
         argsStr: String,
         mode: String,
+        headless: Boolean = false,
     ) {
         val args = runCatching { JSONObject(argsStr.ifEmpty { "{}" }) }.getOrDefault(JSONObject())
         val tool = ToolRegistry.byName(name)
         sse.send(JSONObject().put("type", "tool_start").put("id", tid).put("name", name).put("input", args).toString())
 
         // ---- 决策（与 _decide_tool 逐条对齐）----
+        // headless（定时任务）分支必须排在审批之前：后台没人能点批准，
+        // 走到 awaitDecision 就是白等 120 秒再被超时拒绝。
         val decision: String = when {
             mode == "chat" -> "deny"
             approval.isAutoDenied(name) -> "deny"
             approval.isAutoAllowed(name, sessionId) -> "allow"
+            headless && (tool == null || needsAsk(tool.risk, mode)) -> "headless_denied"
             tool == null && mode != "auto" -> {
                 run.awaitingApproval = PendingApproval(tid, name, "未知工具，请确认是否放行（通常应拒绝）", "danger")
                 val d = approval.awaitDecision(sessionId, tid, name,
@@ -325,7 +337,14 @@ class AgentLoop(
 
         if (decision != "allow") {
             val result = JSONObject().put(
-                "denied", if (decision == "timeout") "审批超时，已自动拒绝" else "用户拒绝了该操作"
+                "denied",
+                when (decision) {
+                    "timeout" -> "审批超时，已自动拒绝"
+                    "headless_denied" ->
+                        "定时任务在后台运行，无人可以确认这次操作，已跳过。" +
+                            "若要允许，请先在对话里手动执行一次并选择「始终允许」，或改用只读工具。"
+                    else -> "用户拒绝了该操作"
+                }
             )
             sse.send(JSONObject().put("type", "tool_update").put("id", tid).put("name", name)
                 .put("status", "denied").put("result", result).toString())
@@ -352,10 +371,89 @@ class AgentLoop(
             .put("status", status).put("result", result)
         if (undoable) update.put("undoable", true)
         sse.send(update.toString())
-        val text = result.toString()
-        messages.put(JSONObject().put("role", "tool").put("tool_call_id", tid).put("content", text))
-        store.addMessage(sessionId, "tool", text,
+        // 落库存全文（用户回看时不该丢内容），但送进上下文必须裁剪：
+        // 一条 run_shell 的 30KB 输出 ≈ 7500 token，且之后每轮都会重发。
+        val fullText = result.toString()
+        val contextText = limitToolResult(fullText)
+        messages.put(JSONObject().put("role", "tool").put("tool_call_id", tid).put("content", contextText))
+        store.addMessage(sessionId, "tool", fullText,
             JSONObject().put("tool_call_id", tid).put("name", name).put("status", status))
+    }
+
+    /**
+     * 工具结果入上下文的截断（对齐 Python `_tool_result_limited`）。
+     *
+     * - 配了 `context.budget_tokens`：单条上限 = 预算 15%（×4 字符/token），
+     *   下限 400、硬顶 60000 字符（≈1.5 万 token）。硬顶不能省——budget=200000
+     *   按比例会给出 12 万字符，一条 cat 大文件就足以挤爆整个上下文。
+     * - 未配置：固定 6000 字符（与 Python MAX_TOOL_TEXT 同值）。
+     * 超限保留首尾、中间标注省略，避免丢掉开头的结构字段与结尾的统计/结论。
+     */
+    private fun limitToolResult(text: String): String {
+        val ctx = settings.contextCfg()
+        val limit = if (ctx.budgetTokens > 0) {
+            maxOf(400, minOf((ctx.budgetTokens * 0.15 * 4).toInt(), MAX_TOOL_TEXT_HARD_CAP))
+        } else {
+            MAX_TOOL_TEXT
+        }
+        if (text.length <= limit) return text
+        val head = limit * 2 / 3
+        val tail = limit - head - 60
+        return text.take(head) +
+            "\n…（工具输出已截断，原文 ${text.length} 字符，仅保留首尾）…\n" +
+            text.takeLast(maxOf(0, tail))
+    }
+
+    /**
+     * 按 token 预算裁剪消息列表（原地修改）。
+     *
+     * 估算口径 4 字符/token，与 Python `CHARS_PER_TOKEN` 一致。未配置预算时
+     * 不裁剪（沿用固定 40 条窗口）；配置了就从最旧开始丢，但：
+     *  - 第 0 条（system，含归档摘要）永不丢；
+     *  - 最后一条（当前这轮 user 消息）永不丢；
+     *  - tool 消息必须跟着它前面的 assistant(tool_calls) 一起丢，否则会出现
+     *    孤立的 tool 响应，OpenAI 兼容端点直接 400。
+     */
+    private fun trimToBudget(messages: JSONArray) {
+        val cfg = settings.contextCfg()
+        val budget = cfg.budgetTokens
+        if (budget <= 0) return
+        fun est(msg: JSONObject): Int = msg.optString("content").length / CHARS_PER_TOKEN + 8
+        var total = 0
+        for (i in 0 until messages.length()) total += est(messages.optJSONObject(i) ?: JSONObject())
+        if (total <= budget) return
+
+        // 从 index 1 往后找第一个可丢的位置，保持「assistant 带 tool_calls」
+        // 与它后面的 tool 响应成对出现。
+        var dropFrom = 1
+        while (dropFrom < messages.length() - 1 && total > budget) {
+            val msg = messages.optJSONObject(dropFrom) ?: break
+            // 若当前要丢的是 tool，往前退到它的 assistant 起点
+            var end = dropFrom + 1
+            if (msg.optString("role") == "tool") {
+                // 不该发生（tool 前面一定是 assistant），保守跳过
+                dropFrom++; continue
+            }
+            // 把紧跟其后的 tool 消息一起带走
+            while (end < messages.length() - 1 &&
+                messages.optJSONObject(end)?.optString("role") == "tool") {
+                end++
+            }
+            for (i in dropFrom until end) total -= est(messages.optJSONObject(i) ?: JSONObject())
+            dropFrom = end
+        }
+        if (dropFrom <= 1) return
+        // 重建：保留 system + 剩余尾部
+        val kept = JSONArray()
+        kept.put(messages.optJSONObject(0) ?: JSONObject())
+        for (i in dropFrom until messages.length()) kept.put(messages.optJSONObject(i) ?: continue)
+        // 插一条提示，让模型知道前面有内容被裁掉了，不要假装自己看过
+        if (kept.length() > 1) {
+            kept.put(1, JSONObject().put("role", "system").put("content",
+                "（较早的对话因超出上下文预算已省略；如需回顾请让用户重新说明。）"))
+        }
+        while (messages.length() > 0) messages.remove(messages.length() - 1)
+        for (i in 0 until kept.length()) messages.put(kept.optJSONObject(i))
     }
 
     /** 从工具结果里取出 `_ckpt` 并落库；返回该调用是否可撤销。 */
@@ -495,6 +593,11 @@ class AgentLoop(
 
     companion object {
         private const val MAX_DEPTH = 8
+        /** 单条工具结果入上下文的固定上限（未配置预算时），与 Python MAX_TOOL_TEXT 同值。 */
+        private const val MAX_TOOL_TEXT = 6000
+        /** 按预算放大时的硬顶：约 1.5 万 token，再大就不是"上下文"而是"文件传输"了。 */
+        private const val MAX_TOOL_TEXT_HARD_CAP = 60_000
+        private const val CHARS_PER_TOKEN = 4
         @Volatile lateinit var appContext: () -> android.content.Context
     }
 }

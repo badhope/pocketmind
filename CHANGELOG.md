@@ -11,6 +11,73 @@ Release mechanics are documented in [docs/VERSIONING.md](docs/VERSIONING.md).
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-07
+
+### Added
+
+- **Context budget for the native engine** — `context.budget_tokens` now actually
+  works on Android. Tool results are truncated before entering the context
+  (6000 chars by default, scaled to 15% of the budget with a 60k hard cap) while
+  the database keeps the full text. History is trimmed by token estimate
+  (4 chars/token), dropping oldest-first but always keeping the system prompt
+  and the current user message, and never splitting an `assistant(tool_calls)` /
+  `tool` pair (that would 400 on OpenAI-compatible endpoints).
+  Without this, one `run_shell` producing 30 KB cost ~7.5k tokens **per turn**
+  for the rest of the session.
+- **API key encryption via Android Keystore.** `config.json` now stores the key
+  as `v1:` + AES-256-GCM ciphertext with the key material held in the TEE.
+  In-memory values stay plaintext so callers are unaffected; `/api/diagnostics`
+  reports `secret_storage: keystore-encrypted | plaintext-fallback` honestly
+  instead of pretending encryption succeeded.
+- **Approval audit log** — `files/audit/approvals.jsonl` (append-only, 1 MB
+  rotation) records time / session / tool / risk / decision for every approval,
+  including timeouts. Deliberately excludes tool arguments (they may contain
+  clipboard contents or phone numbers). Readable at `GET /api/approvals/audit`.
+  The project calls approvals its security boundary; now that claim is
+  auditable instead of living in memory.
+- **Scheduled jobs run headless.** When a job triggers a tool that needs
+  approval there is nobody to approve it, so the loop used to block for the
+  full 120 s timeout and then silently deny. It now denies immediately with an
+  explicit reason the user can act on.
+- **Cascade delete for sessions** — deleting a session now also removes its
+  archives, its jobs, its approval allow-list entries, and the checkpoint backup
+  files on disk. Previously the session vanished but the backups (and jobs that
+  would recreate it) stayed.
+- **Coverage gate** (`tests/check_coverage.py`): line coverage measured at
+  **46.4%**, floor set to 40% and ratcheted (raise-only). Every comparable
+  project surveyed has no coverage gate at all.
+- **Dependency locks** (`agentd/requirements-lock.txt`,
+  `requirements-dev-lock.txt`) plus `tests/check_locks.py`, which fails when a
+  direct dependency is added to `requirements.txt` without re-freezing. CI now
+  installs from the lock files.
+- **Release workflow** (`.github/workflows/release.yml`): pushing a `v*` tag
+  builds, tests, lints, verifies `versionName` matches the tag, runs
+  `apksigner verify` + `zipalign -c`, and publishes the APK with release notes.
+  Without keystore secrets it produces an explicitly-labelled unsigned build.
+- **Security workflow** (`.github/workflows/security.yml`): OSV dependency
+  scan, gitleaks full-history secret scan (runs on PRs too), and CodeQL for
+  Python and Kotlin/Java.
+- **Pre-commit hook** (`scripts/install-hooks.sh`): secret-shaped strings,
+  ruff, `tsc`, and version consistency — the fast checks, so CI failures
+  aren't discovered a round-trip later.
+- **Local DB migration tests** — v1 schema → current, asserting old sessions and
+  messages survive and the new tables are usable.
+
+### Changed
+
+- Bug and feature issue templates converted to GitHub Issue Forms (required
+  fields: runtime, version, device, repro steps).
+- Added `CODEOWNERS` (security-sensitive paths pinned) and a root `AGENTS.md`
+  with the non-negotiable rules for both AI assistants and humans.
+- `docs/COMPETITORS.md` corrected: it claimed 59% line coverage against a 90%
+  red line; the measured value was never that, and no gate existed. Now states
+  the measured number and points at the enforced floor.
+
+### Fixed
+
+- Dependabot now also covers Gradle and Docker ecosystems (previously only
+  Actions/npm/pip).
+
 ## [1.5.2] - 2026-11-06
 
 ### Security

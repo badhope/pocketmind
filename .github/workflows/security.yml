@@ -1,0 +1,95 @@
+name: Security
+
+# 安全扫描三件套：依赖漏洞、密钥泄露、静态分析。
+#
+# 为什么分三个 job 而不是塞进 ci.yml：这三件事失败的原因和修法完全不同
+# （升级依赖 / 撤销密钥 / 改代码），混在一个红色 X 里会让人分不清该找谁。
+# 全部在 push 与每周定时跑；secret scan 额外在 PR 上跑（挡住手滑提交）。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # 每周一 03:00 UTC：依赖漏洞是持续变化的，不能只在提交时看
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  dependency-audit:
+    name: Dependency vulnerabilities (OSV)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps (no build isolation issues on CI)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r agentd/requirements-lock.txt -r agentd/requirements-dev-lock.txt
+
+      - name: OSV-Scanner
+        uses: google/osv-scanner-action/osv-scanner-action@v2
+        continue-on-error: false
+        with:
+          scan-args: |-
+            --lockfile=agentd/requirements-lock.txt
+            --lockfile=agentd/web/package-lock.json
+
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 全历史扫描，不只看当前快照
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  codeql:
+    name: CodeQL (Python + Kotlin/Java)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["python", "java-kotlin"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+
+      - uses: actions/setup-java@v4
+        if: matrix.language == 'java-kotlin'
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+        if: matrix.language == 'java-kotlin'
+
+      - name: Build for analysis
+        if: matrix.language == 'java-kotlin'
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" >/dev/null
+          cd termux/apk-shell && bash ./gradlew assembleDebug --no-daemon
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

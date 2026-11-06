@@ -31,10 +31,11 @@ jobs:
             agentd/requirements.txt
             agentd/requirements-dev.txt
 
-      - name: Install dependencies
+      # 用锁文件装：CI 与本地跑的是同一棵依赖树，避免上游 patch 让门禁漂移。
+      - name: Install dependencies (locked)
         run: |
           python -m pip install --upgrade pip
-          pip install -r agentd/requirements.txt -r agentd/requirements-dev.txt
+          pip install -r agentd/requirements-lock.txt -r agentd/requirements-dev-lock.txt
 
       - name: Run backend gate
         run: bash tests/run_all.sh --backend

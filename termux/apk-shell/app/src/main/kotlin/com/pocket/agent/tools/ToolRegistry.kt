@@ -193,7 +193,10 @@ object ToolRegistry {
         "pocketmind.db",    // 会话与消息原文
         "rules.json.bak",
     )
-    private val DENIED_DIRS = setOf("checkpoints")  // 撤销备份可能含任意原文件
+    private val DENIED_DIRS = setOf(
+        "checkpoints",  // 撤销备份可能含任意原文件
+        "audit",        // 审批审计：只读元数据，但同样不该被模型/网页读走
+    )
 
     private fun safeFile(env: DeviceEnv, path: String, forWrite: Boolean = false): File? {
         val root = env.context.filesDir.canonicalFile

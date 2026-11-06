@@ -254,9 +254,27 @@ bash tests/run_all.sh --backend    # 只跑后端
 bash tests/run_all.sh --with-e2e   # 追加 Playwright（浏览器装一次）
 ```
 
-只有全部通过时退出码才是 `0`，失败项会在末尾汇总列出。门禁覆盖全部 Python 套件
-外加 `compileall`、`ruff` 与部署链路自检；前端 typecheck、单测、生产构建，以及
-**`dist/` 新鲜度校验**（入库的产物必须与当前源码一致，因为手机端从不构建它）。
+只有全部通过时退出码才是 `0`，失败项会在末尾汇总列出。门禁覆盖：
+
+- **后端**：`ruff` + `mypy` + 51 个套件 + `compileall` + **依赖锁一致性** + **覆盖率红线**
+- **前端**：`tsc` + Vitest + 生产构建 + **`dist/` 新鲜度校验**
+  （入库的产物必须与当前源码一致，因为手机端从不构建它）
+- **Android**：57 个 Robolectric 测试 + `lintDebug`（0 error 才算过）+ APK 构建
+
+```bash
+# Android 单独跑（需要 JDK 17+ 与 Android SDK）
+cd termux/apk-shell
+GRADLE_USER_HOME="$PWD/.gradle-home" gradle testDebugUnitTest lintDebug assembleDebug
+```
+
+**覆盖率**：当前行覆盖 **46.4%**，红线 40% 且只升不降。这个数字比大多数同类项目
+更难看的唯一原因是——它们根本没有覆盖率门禁。宁可数字难看，不要假数字。
+
+**依赖可复现**：`agentd/requirements-lock.txt` 固定整棵依赖树；加了直接依赖却忘了
+重新冻结，`tests/check_locks.py` 会直接拦住。
+
+**发布**：推 `v*` tag 即触发 `.github/workflows/release.yml`——构建、测试、lint、
+校验 `versionName` 与 tag 一致、`apksigner verify`、发 Release。
 
 逐套件说明：[smoke/README.md](smoke/README.md)。
 API 参考：[docs/API.md](docs/API.md)。

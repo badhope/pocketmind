@@ -1,0 +1,86 @@
+name: Bug 反馈
+description: 报告可复现的问题（安全漏洞请勿在此提交，见 SECURITY.md）
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **安全漏洞不要在这里提**。请按 [SECURITY.md](../blob/main/SECURITY.md) 的流程私下报告。
+
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: 运行方式
+      description: 你用的是哪一个运行时？两者的能力面不同，排查路径也不同。
+      options:
+        - 独立 APK（原生 Kotlin 引擎）
+        - Termux（Python agentd）
+        - Docker / VPS（Python agentd）
+        - 本机 mock 模式（无 API Key）
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 设置页底部，或 `GET /api/health` 返回的 version；APK 用户填「设置 → 关于」里的版本号
+      placeholder: "1.6.0"
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: 设备与系统
+      description: 机型 + Android 版本（如 Pixel 6 / Android 14）；桌面端填 OS + 版本
+      placeholder: "Xiaomi 13 / Android 14 (HyperOS)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从「打开应用」开始写，精确到点了哪个按钮。缺步骤的问题通常无法定位。
+      placeholder: |
+        1. 打开应用，进入「设置 → 模型」
+        2. 填入 DeepSeek 的 base_url 与 key，保存
+        3. 回到对话，输入「查一下电量」
+        4. 看到工具卡显示红色
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 有报错就贴完整报错；APK 用户可在「设置 → 诊断」导出诊断信息
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: 诊断信息（可选）
+      description: APK：设置 → 诊断 → 复制；Termux：`curl -s 127.0.0.1:8787/api/diagnostics`
+      render: json
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索过现有 issue，这不是重复报告
+          required: true
+        - label: 我已移除日志里的 API Key、手机号等敏感信息
+          required: true
