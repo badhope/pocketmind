@@ -575,4 +575,59 @@ class EngineContractTest {
         // 真正没实现的路径必须仍然 fail-closed，不能因为加了自检就放开
         assertEquals(503, get("/api/never-implemented").code)
     }
+
+    // ---------- 凭据泄露防线（read_file 是 safe 级，永不弹审批） ----------
+
+    @Test
+    fun `read_file 不能读到 config_json 里的 API Key`() {
+        bootstrap()
+        configureLlm()
+        val env = com.pocket.agent.tools.DeviceEnv(context, store, "")
+        val read = com.pocket.agent.tools.ToolRegistry.byName("read_file")!!
+        val list = com.pocket.agent.tools.ToolRegistry.byName("list_dir")!!
+
+        // 工具用 ToolAbort 表达"拒绝"，与 AgentLoop 的捕获路径一致。
+        fun call(tool: com.pocket.agent.tools.ToolDef, args: JSONObject): JSONObject =
+            try {
+                tool.handler(args, env)
+            } catch (e: com.pocket.agent.tools.ToolAbort) {
+                e.result
+            }
+
+        // 直接读 / 相对路径读 / 用 .. 归一后读：三种写法都必须被拒
+        for (p in listOf("config.json", "./config.json", "sub/../config.json")) {
+            val r = call(read, JSONObject().put("path", p))
+            assertTrue("$p 必须被拒绝，实际：$r", r.has("error"))
+            assertFalse("拒绝理由不能回显密钥：$r", r.toString().contains("sk-test-1234567890"))
+        }
+
+        // 列目录时也不能暴露这些文件名
+        val names = (call(list, JSONObject().put("path", ".")).optJSONArray("entries")?.let { arr ->
+            (0 until arr.length()).map { arr.getJSONObject(it).optString("name") }
+        } ?: emptyList())
+        assertFalse("list_dir 不应列出 config.json：$names", "config.json" in names)
+        assertFalse("list_dir 不应列出 rules.json：$names", "rules.json" in names)
+
+        // 写删同样受限：先覆盖再读的迂回路径也不行
+        for (name in listOf("write_file", "delete_file")) {
+            val tool = com.pocket.agent.tools.ToolRegistry.byName(name)!!
+            val r = call(tool, JSONObject().put("path", "config.json").put("content", "{}"))
+            assertTrue("$name 对 config.json 必须被拒：$r", r.has("error"))
+        }
+    }
+
+    @Test
+    fun `read_file 仍能读普通用户文件`() {
+        bootstrap()
+        val env = com.pocket.agent.tools.DeviceEnv(context, store, "")
+        java.io.File(context.filesDir, "notes.txt").writeText("普通内容")
+        val r = com.pocket.agent.tools.ToolRegistry.byName("read_file")!!
+            .handler(JSONObject().put("path", "notes.txt"), env)
+        assertEquals("普通文件必须照常可读", "普通内容", r.optString("content"))
+        // 普通写入也必须照常工作
+        val w = com.pocket.agent.tools.ToolRegistry.byName("write_file")!!
+            .handler(JSONObject().put("path", "notes.txt").put("content", "改过了"), env)
+        assertTrue("普通写入应成功：$w", w.optBoolean("ok"))
+        assertEquals("改过了", java.io.File(context.filesDir, "notes.txt").readText())
+    }
 }

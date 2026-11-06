@@ -11,6 +11,22 @@ Release mechanics are documented in [docs/VERSIONING.md](docs/VERSIONING.md).
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-11-06
+
+### Security
+
+- **`read_file` / `list_dir` / `write_file` / `delete_file` could reach the
+  app's own credentials.** `read_file` is a `safe`-tier tool, which by design
+  never raises an approval prompt, and it was scoped to the whole `filesDir` —
+  the same directory that holds `config.json` (plaintext LLM API key) and
+  `rules.json` (which dangerous tools the user permanently allowed). A single
+  injected web page or SMS could therefore read the key silently and ship it out
+  with the next model request. The native engine now rejects `config.json`,
+  `rules.json`, `pocketmind.db` and the `checkpoints/` backup directory for read,
+  list, write and delete alike; the fix is locked by
+  `read_file 不能读到 config_json 里的 API Key`, which fails if the deny list is
+  removed (mutation-verified).
+
 ## [1.5.1] - 2026-11-06
 
 ### Fixed

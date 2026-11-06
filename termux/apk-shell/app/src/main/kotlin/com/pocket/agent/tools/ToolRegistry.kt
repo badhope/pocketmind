@@ -176,10 +176,39 @@ object ToolRegistry {
 
     // ═══════════════ 文件（app 私有目录内，路径穿越不可能） ═══════════════
 
-    private fun safeFile(env: DeviceEnv, path: String): File? {
+    /**
+     * 文件工具的访问根 + 拒绝名单。
+     *
+     * 为什么要拒绝名单：`read_file`/`list_dir` 是 **safe 级**，永远不弹审批。
+     * 而应用的 `config.json`（含 LLM API Key）与 `rules.json` 就在同一个 filesDir 里。
+     * 没有这层时，一条被注入的短信/网页就能让模型静默读走 API Key，
+     * 内容随下一次 LLM 请求直接离开设备 —— 这是真实可复现的凭据外泄路径，
+     * 由 EngineContractTest 的 `read_file 不能读到 config_json` 用例锁定。
+     *
+     * Python 侧有同样一份（agentd/tools/files.py 的 _denied_dirs）。
+     */
+    private val DENIED_FILES = setOf(
+        "config.json",      // LLM API Key（明文）
+        "rules.json",       // 审批名单（含用户放行了哪些危险工具）
+        "pocketmind.db",    // 会话与消息原文
+        "rules.json.bak",
+    )
+    private val DENIED_DIRS = setOf("checkpoints")  // 撤销备份可能含任意原文件
+
+    private fun safeFile(env: DeviceEnv, path: String, forWrite: Boolean = false): File? {
         val root = env.context.filesDir.canonicalFile
         val f = File(root, path.trimStart('/')).canonicalFile
-        return if (f.path.startsWith(root.path)) f else null
+        if (!f.path.startsWith(root.path)) return null
+        // 相对 root 的路径分量：拒绝名单按分量比对，避免 `./config.json`、
+        // `sub/../config.json` 这类等价写法绕过（canonical 已归一，这里只需比最终路径）。
+        val rel = f.path.removePrefix(root.path).trimStart(File.separatorChar)
+        if (rel.isEmpty()) return null
+        val first = rel.substringBefore(File.separatorChar)
+        if (first in DENIED_DIRS) return null
+        if (rel in DENIED_FILES) return null
+        // 写/删同样受限：否则先覆盖再读的迂回路径又回来了。
+        if (forWrite && first in DENIED_FILES) return null
+        return f
     }
 
     /**
@@ -239,7 +268,7 @@ object ToolRegistry {
                 "write_file", "把文本写入应用数据目录（覆盖）。", "write", "写入文件", "files",
                 schema("path" to ("string" to true), "content" to ("string" to true))
             ) { args, env ->
-                val f = safeFile(env, optString(args, "path")) ?: throw ToolAbort(err("路径越界"))
+                val f = safeFile(env, optString(args, "path"), forWrite = true) ?: throw ToolAbort(err("路径越界"))
                 f.parentFile?.mkdirs()
                 val ckpt = if (f.isFile) backupForUndo(env, f, "overwrite") else null
                 f.writeText(optString(args, "content"))
@@ -252,7 +281,7 @@ object ToolRegistry {
                 "delete_file", "删除应用数据目录下的一个文件。", "danger", "删除文件", "files",
                 schema("path" to ("string" to true))
             ) { args, env ->
-                val f = safeFile(env, optString(args, "path")) ?: throw ToolAbort(err("路径越界"))
+                val f = safeFile(env, optString(args, "path"), forWrite = true) ?: throw ToolAbort(err("路径越界"))
                 if (!f.isFile) throw ToolAbort(err("文件不存在：${f.name}"))
                 val ckpt = backupForUndo(env, f, "restore")
                 JSONObject().put("ok", f.delete()).put("path", f.name)
@@ -267,7 +296,7 @@ object ToolRegistry {
                 val url = optString(args, "url")
                 val guard = SsrfGuard.check(url) ?: throw ToolAbort(err("URL 不合法：$url"))
                 val name = optString(args, "path", "download-${System.currentTimeMillis()}")
-                val f = safeFile(env, name) ?: throw ToolAbort(err("路径越界"))
+                val f = safeFile(env, name, forWrite = true) ?: throw ToolAbort(err("路径越界"))
                 val conn = guard.open()
                 conn.connectTimeout = 15000
                 conn.readTimeout = 60000
