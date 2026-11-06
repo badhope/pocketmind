@@ -35,6 +35,18 @@ Release mechanics are documented in [docs/VERSIONING.md](docs/VERSIONING.md).
   bypass), `undici 8.11.2 → 8.12.4` (8 GHSAs incl. TLS validation bypass; via
   jsdom ^8.10.2 so a plain `npm update` sufficed). The OSV gate now reports
   **zero known vulnerabilities across 272 pinned versions**, locally verified.
+- **dist freshness gate caught a real mistake**: bumping `dompurify` without
+  rebuilding `dist/` would have shipped the old sanitizer inside the APK. The
+  committed bundle is rebuilt and the gate passes again — exactly the scenario
+  this check exists for (the phone never builds dist).
+- **Coverage gate: retry-once for interpreter-crash flakes.** ~1 in 10 traced
+  runs dies during interpreter teardown with Windows status `0xC0000409` while
+  every assertion has already passed ("22 通过 / 0 失败", exit 3221226505).
+  The gate now separates assertion failures (hard fail, no retry) from
+  crash-after-all-pass (retry once, loudly reported). Verified live: the very
+  next local run hit the crash, retried, and passed. Backend CI on Linux had
+  failed and passed on identical commits — the same flake, now contained.
+- `agentd/web/dist` rebuilt and committed to match the new dependency set.
 
 ## [1.6.1] - 2026-11-07
 

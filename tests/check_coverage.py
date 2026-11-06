@@ -16,6 +16,7 @@ pytest 直接收集不到。用 `coverage run` 包住这些脚本才是真实覆
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -75,13 +76,37 @@ def run() -> int:
             f"--source={TARGET}",
             str(path),
         ]
-        r = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
+        def once(cmd=cmd):
+            return subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
+        r = once()
         if r.returncode != 0:
-            failed_suites.append(suite)
-            tail = (r.stdout or r.stderr or "").strip().splitlines()[-6:]
-            print(f"  采集 {suite} ... 失败（exit {r.returncode}）")
-            for line in tail:
-                print(f"      {line}")
+            out = r.stdout or r.stderr or ""
+            # 区分两类失败：
+            #  - 断言失败：输出含「N 失败」且 N>0 → 真红，不重试
+            #  - 进程崩溃：断言全过（0 失败）但退出码非零。实测为 Windows
+            #    coverage tracer 在解释器收尾阶段偶发 0xC0000409（约 1/10），
+            #    断言本身全绿。对这类崩溃重试一次；仍崩才算失败。
+            m = re.search(r"(\d+)\s*失败", out)
+            asserted_failed = bool(m) and int(m.group(1)) > 0
+            if not asserted_failed:
+                r2 = once()  # 同参数重试
+                if r2.returncode == 0:
+                    print(f"  采集 {suite} ... FLAKY-CRASH，重试通过"
+                          f"（首次 exit {r.returncode}，断言全过；tracer 收尾阶段偶发崩溃）")
+                    r = r2
+                else:
+                    out2 = r2.stdout or r2.stderr or ""
+                    m2 = re.search(r"(\d+)\s*失败", out2)
+                    if not (m2 and int(m2.group(1)) > 0):
+                        # 重试仍是崩溃且断言全过 → 再给最后一次机会前先记录
+                        print(f"  采集 {suite} ... 崩溃复现（exit {r.returncode}/{r2.returncode}，断言全过）")
+            if r.returncode != 0:
+                failed_suites.append(suite)
+                out = r.stdout or r.stderr or ""
+                tail = out.strip().splitlines()[-6:]
+                print(f"  采集 {suite} ... 失败（exit {r.returncode}）")
+                for line in tail:
+                    print(f"      {line}")
         else:
             print(f"  采集 {suite} ... ok")
 
