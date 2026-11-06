@@ -22,7 +22,7 @@ mypy-extensions==1.1.0
 packaging==26.3
 pathspec==1.1.1
 pluggy==1.7.0
-pytest==9.0.3
+pytest==9.2.0
 coverage==7.17.2
 pytest-cov==7.1.0
 pytest-asyncio==1.4.1.post1
