@@ -104,11 +104,13 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install platform + build-tools
+      # ubuntu-latest 自带 Android SDK（ANDROID_HOME 已指向 /usr/local/lib/android/sdk）。
+      # 1.6.0 用的 android-actions/setup-android@v3 在该镜像上每次都红（16 个 run 无一例外），
+      # 所以这里不再重装 SDK，只补齐本项目需要的 platform/build-tools 并接受许可证。
+      - name: Install platform + build-tools (preinstalled SDK)
         run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          yes | sdkmanager --licenses > /dev/null || true
           sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Unit tests (Robolectric)

@@ -37,11 +37,11 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install platform + build-tools
-        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      # 与 ci.yml 同因：不用 setup-android，直接用 runner 预装 SDK
+      - name: Install platform + build-tools (preinstalled SDK)
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Decode keystore (skip when secret absent)
         id: keystore

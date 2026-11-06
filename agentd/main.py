@@ -50,7 +50,7 @@ def _sse_event(ev: dict) -> ServerSentEvent:
     return ServerSentEvent(data=json.dumps(ev, ensure_ascii=False), sep="\n")
 
 
-VERSION = "1.6.0"
+VERSION = "1.6.1"
 APP_NAME = "口袋智灵"
 
 # 导出格式版本（/api/export 的 format_version 字段）。

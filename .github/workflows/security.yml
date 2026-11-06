@@ -41,9 +41,10 @@ jobs:
         uses: google/osv-scanner-action/osv-scanner-action@v2
         continue-on-error: false
         with:
+          # osv-scanner v2 移除了 --lockfile 旗标，改为位置参数
           scan-args: |-
-            --lockfile=agentd/requirements-lock.txt
-            --lockfile=agentd/web/package-lock.json
+            agentd/requirements-lock.txt
+            agentd/web/package-lock.json
 
   secret-scan:
     name: Secret scan (gitleaks)

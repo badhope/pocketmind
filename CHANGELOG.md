@@ -11,6 +11,31 @@ Release mechanics are documented in [docs/VERSIONING.md](docs/VERSIONING.md).
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-11-07
+
+### Fixed
+
+- **CI on Linux was red for every commit in history — now diagnosed and fixed.**
+  Discovered after push while closing out: every `CI` run on GitHub `main` had
+  failed, including v1.6.0's. Two independent root causes, both in environment
+  setup rather than application code:
+  - `requirements-lock.txt` was frozen on Windows and pinned `pywin32==312`
+    (Windows-only, no Linux distribution). `pip install` on Linux failed at
+    "Install dependencies (locked)". The pin now carries
+    `; sys_platform == "win32"`, so Windows stays pinned and Linux skips it.
+  - `android-actions/setup-android@v3` failed on every run against the current
+    `ubuntu-latest` image. Both CI and Release now use the runner's preinstalled
+    SDK directly (`sdkmanager --licenses` + install the three needed packages).
+  - Latent third bug caught in passing: the coverage gate needs the `coverage`
+    module, but `pytest-cov`/`coverage` were never in `requirements-dev.txt` or
+    the dev lock — the gate would have failed right after the install step was
+    fixed. Both added; the lock now installs and the full backend gate passes
+    from a clean venv built **only** from the lock files (52/52).
+- `security.yml`: osv-scanner v2 removed the `--lockfile` flag; scan targets are
+  now positional, matching the v2 CLI.
+- Local verification of this release: fresh venv from locks → install clean →
+  backend gate 52/52 → `check_version` and `check_locks` pass.
+
 ## [1.6.0] - 2026-11-07
 
 ### Added
