@@ -3,7 +3,7 @@ fastapi>=0.115,<1
 # Termux(aarch64/bionic) 上没有可用 wheel，必须本地编译，极易失败。本机低并发场景
 # 下 uvicorn 自带的纯 Python h11 完全够用，因此这里只装裸 uvicorn。
 uvicorn>=0.30
-openai>=1.40
+openai>=3.44.0
 # 上限 <4：3.11 把 util.timezone 从 pytz 工厂换成了 datetime.timezone 类，
 # 曾让时区解析静默退化成 UTC（见 docs/audit-2026-10-29.md B2）。4.x 还会有破坏性变更，
 # 升级时须重跑 smoke/p32。
@@ -15,7 +15,7 @@ sse-starlette>=2.1
 pydantic>=2.0,<3
 pydantic-settings>=2.0,<3
 mcp>=1.0
-sqlalchemy[asyncio]>=2.0,<3
+sqlalchemy[asyncio]>=2.1.7,<3
 aiosqlite>=0.19
 # fastapi 传递依赖：python-multipart 0.0.20 有多个 CVE（PYSEC-2026-*），这里显式抬地板
 python-multipart>=0.0.31
