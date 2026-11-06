@@ -24,7 +24,7 @@ jobs:
   dependency-audit:
     name: Dependency vulnerabilities (OSV)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -32,19 +32,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install deps (no build isolation issues on CI)
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r agentd/requirements-lock.txt -r agentd/requirements-dev-lock.txt
-
-      - name: OSV-Scanner
-        uses: google/osv-scanner-action/osv-scanner-action@v2
-        continue-on-error: false
-        with:
-          # osv-scanner v2 移除了 --lockfile 旗标，改为位置参数
-          scan-args: |-
-            agentd/requirements-lock.txt
-            agentd/web/package-lock.json
+      # 直接查 OSV 官方 API（与 osv-scanner 同一数据源），纯标准库零安装。
+      # 弃用 google/osv-scanner-action@v2：其 action ref 在 1.6.1 的 Security job
+      # 上连 "Set up job" 都过不了，且 v1→v2 CLI 旗标漂移（--lockfile 被移除）。
+      # 本地可复现：python tests/check_osv.py
+      - name: OSV 漏洞查询（锁文件全部固定版本）
+        run: python tests/check_osv.py
 
   secret-scan:
     name: Secret scan (gitleaks)
@@ -82,13 +75,24 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - uses: android-actions/setup-android@v3
-        if: matrix.language == 'java-kotlin'
+      - name: Install Android SDK (self-hosted cmdline-tools)
+        run: |
+          set -e
+          SDK="${ANDROID_HOME:-$HOME/android-sdk}"
+          if [ ! -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
+            mkdir -p "$SDK/cmdline-tools"
+            curl -sSfL --retry 3               "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"               -o /tmp/clt.zip
+            unzip -q /tmp/clt.zip -d "$SDK/cmdline-tools"
+            mv "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
+          fi
+          export PATH="$SDK/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
 
       - name: Build for analysis
         if: matrix.language == 'java-kotlin'
         run: |
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" >/dev/null
           cd termux/apk-shell && bash ./gradlew assembleDebug --no-daemon
 
       - uses: github/codeql-action/analyze@v3

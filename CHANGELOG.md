@@ -11,6 +11,31 @@ Release mechanics are documented in [docs/VERSIONING.md](docs/VERSIONING.md).
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-11-07
+
+### Fixed
+
+- **Android CI: the runner image no longer ships an Android SDK.** The current
+  `ubuntu-24.04` runner image contains no Android tooling at all (its README
+  lists nothing under "android"), so neither `sdkmanager` on PATH nor
+  `android-actions/setup-android@v3` can work — the latter had failed on all 16
+  runs. CI, Release and the CodeQL build now install `cmdline-tools`
+  (pinned `commandlinetools-linux-11076708`) from Google's official source and
+  add `platforms;android-35` + `build-tools;35.0.0` themselves, then export
+  `ANDROID_HOME` via `$GITHUB_ENV`.
+- **Security: the OSV job never even started** — its action ref
+  (`google/osv-scanner-action/osv-scanner-action@v2`) failed at "Set up job",
+  and the v1→v2 CLI had dropped the `--lockfile` flag anyway. Replaced with
+  `tests/check_osv.py`, which queries the same OSV dataset directly over its
+  official API for every pinned version in both lock files (PyPI + npm, 272
+  entries), needs no third-party action, and is runnable locally.
+- **Three real vulnerabilities found by that gate and fixed:**
+  `pytest 8.4.2 → 9.0.3` (GHSA-6w46-j5rx-g56g, dev dep; the `pytest>=8,<9` cap
+  was dropped), `dompurify 3.4.16 → 3.4.17` (3 GHSAs incl. SAFE_FOR_TEMPLATES
+  bypass), `undici 8.11.2 → 8.12.4` (8 GHSAs incl. TLS validation bypass; via
+  jsdom ^8.10.2 so a plain `npm update` sufficed). The OSV gate now reports
+  **zero known vulnerabilities across 272 pinned versions**, locally verified.
+
 ## [1.6.1] - 2026-11-07
 
 ### Fixed
