@@ -1,7 +1,7 @@
 # 口袋 Agent · Docker 部署（多阶段构建：前端 build + Python 运行时）
 
 # ---- 阶段 1：构建前端 dist ----
-FROM node:22-alpine AS web
+FROM node:25-alpine AS web
 WORKDIR /src
 COPY agentd/web/package.json agentd/web/package-lock.json ./agentd/web/
 RUN cd agentd/web && npm ci --no-audit --no-fund
