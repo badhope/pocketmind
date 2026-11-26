@@ -85,13 +85,20 @@ jobs:
 
       - name: Verify version matches tag
         run: |
+          set -e
           TAG="${GITHUB_REF_NAME#v}"
-          NAME=$(aapt dump badging termux/apk-shell/app/build/outputs/apk/*/*.apk | head -1 | grep -oP "versionName='\K[^']+")
-          echo "tag=$TAG apk=$NAME"
-          if [ "$TAG" != "$NAME" ]; then
-            echo "::error::APK versionName ($NAME) 与 tag ($TAG) 不一致"
-            exit 1
-          fi
+          # aapt 不在 runner 默认 PATH（build-apk.sh 内部用的是自己的 PATH 设置），
+          # 从 ANDROID_HOME 定位，顺带校验两份 APK（debug 与 release）
+          AAPT=$(find "$ANDROID_HOME" -type f -name aapt | head -1)
+          echo "aapt=$AAPT"
+          for APK in termux/apk-shell/app/build/outputs/apk/*/*.apk; do
+            NAME=$("$AAPT" dump badging "$APK" | head -1 | grep -oP "versionName='\K[^']+")
+            echo "$(basename "$APK"): versionName=$NAME vs tag=$TAG"
+            if [ "$TAG" != "$NAME" ]; then
+              echo "::error::$(basename "$APK") 的 versionName ($NAME) 与 tag ($TAG) 不一致"
+              exit 1
+            fi
+          done
 
       - name: Verify signature
         if: steps.keystore.outputs.signed == 'true'
