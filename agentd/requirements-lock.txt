@@ -12,6 +12,9 @@
 #   uv pip install -r agentd/requirements.txt -r agentd/requirements-dev.txt
 #   uv pip freeze > .tmp/frozen.txt   然后按下方分组重排两份锁文件
 #
+# 注意：Windows 专属包必须带 sys_platform 标记（如 pywin32），
+# 否则在 Linux CI 上 pip install 直接失败——这就是 1.6.0 的 CI 全红根因。
+#
 # 注意：本文件**不用于 Termux 安装**——aarch64 上需要源码编译的包版本不同，
 # Termux 仍用 requirements.txt 让 pip 挑可用 wheel。
 
@@ -57,7 +60,7 @@ pygments==2.21.0
 pyjwt==2.15.1
 python-dotenv==1.2.4
 python-multipart==0.0.33
-pywin32==312
+pywin32==312; sys_platform == "win32"
 pyyaml==6.0.3
 referencing==0.37.0
 rpds-py==2026.9.1

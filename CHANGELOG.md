@@ -11,6 +11,68 @@ Release mechanics are documented in [docs/VERSIONING.md](docs/VERSIONING.md).
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-11-07
+
+### Fixed
+
+- **Android CI: the runner image no longer ships an Android SDK.** The current
+  `ubuntu-24.04` runner image contains no Android tooling at all (its README
+  lists nothing under "android"), so neither `sdkmanager` on PATH nor
+  `android-actions/setup-android@v3` can work — the latter had failed on all 16
+  runs. CI, Release and the CodeQL build now install `cmdline-tools`
+  (pinned `commandlinetools-linux-11076708`) from Google's official source and
+  add `platforms;android-35` + `build-tools;35.0.0` themselves, then export
+  `ANDROID_HOME` via `$GITHUB_ENV`.
+- **Security: the OSV job never even started** — its action ref
+  (`google/osv-scanner-action/osv-scanner-action@v2`) failed at "Set up job",
+  and the v1→v2 CLI had dropped the `--lockfile` flag anyway. Replaced with
+  `tests/check_osv.py`, which queries the same OSV dataset directly over its
+  official API for every pinned version in both lock files (PyPI + npm, 272
+  entries), needs no third-party action, and is runnable locally.
+- **Three real vulnerabilities found by that gate and fixed:**
+  `pytest 8.4.2 → 9.0.3` (GHSA-6w46-j5rx-g56g, dev dep; the `pytest>=8,<9` cap
+  was dropped), `dompurify 3.4.16 → 3.4.17` (3 GHSAs incl. SAFE_FOR_TEMPLATES
+  bypass), `undici 8.11.2 → 8.12.4` (8 GHSAs incl. TLS validation bypass; via
+  jsdom ^8.10.2 so a plain `npm update` sufficed). The OSV gate now reports
+  **zero known vulnerabilities across 272 pinned versions**, locally verified.
+- **dist freshness gate caught a real mistake**: bumping `dompurify` without
+  rebuilding `dist/` would have shipped the old sanitizer inside the APK. The
+  committed bundle is rebuilt and the gate passes again — exactly the scenario
+  this check exists for (the phone never builds dist).
+- **Coverage gate: retry-once for interpreter-crash flakes.** ~1 in 10 traced
+  runs dies during interpreter teardown with Windows status `0xC0000409` while
+  every assertion has already passed ("22 通过 / 0 失败", exit 3221226505).
+  The gate now separates assertion failures (hard fail, no retry) from
+  crash-after-all-pass (retry once, loudly reported). Verified live: the very
+  next local run hit the crash, retried, and passed. Backend CI on Linux had
+  failed and passed on identical commits — the same flake, now contained.
+- `agentd/web/dist` rebuilt and committed to match the new dependency set.
+
+## [1.6.1] - 2026-11-07
+
+### Fixed
+
+- **CI on Linux was red for every commit in history — now diagnosed and fixed.**
+  Discovered after push while closing out: every `CI` run on GitHub `main` had
+  failed, including v1.6.0's. Two independent root causes, both in environment
+  setup rather than application code:
+  - `requirements-lock.txt` was frozen on Windows and pinned `pywin32==312`
+    (Windows-only, no Linux distribution). `pip install` on Linux failed at
+    "Install dependencies (locked)". The pin now carries
+    `; sys_platform == "win32"`, so Windows stays pinned and Linux skips it.
+  - `android-actions/setup-android@v3` failed on every run against the current
+    `ubuntu-latest` image. Both CI and Release now use the runner's preinstalled
+    SDK directly (`sdkmanager --licenses` + install the three needed packages).
+  - Latent third bug caught in passing: the coverage gate needs the `coverage`
+    module, but `pytest-cov`/`coverage` were never in `requirements-dev.txt` or
+    the dev lock — the gate would have failed right after the install step was
+    fixed. Both added; the lock now installs and the full backend gate passes
+    from a clean venv built **only** from the lock files (52/52).
+- `security.yml`: osv-scanner v2 removed the `--lockfile` flag; scan targets are
+  now positional, matching the v2 CLI.
+- Local verification of this release: fresh venv from locks → install clean →
+  backend gate 52/52 → `check_version` and `check_locks` pass.
+
 ## [1.6.0] - 2026-11-07
 
 ### Added

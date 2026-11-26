@@ -181,3 +181,6 @@ nul
 
 # 本机构建用的隔离 Gradle 主目录（避免用户级 init 脚本污染）
 .gradle-home/
+
+# 本地验证用的临时 venv（1.6.2 CI 修复期间创建）
+.venv-ci/
